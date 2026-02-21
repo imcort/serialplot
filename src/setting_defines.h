@@ -70,6 +70,7 @@ const char SG_CustomFrame_NumOfChannels[] = "numOfChannels";
 const char SG_CustomFrame_FrameStart[] = "frameStart";
 const char SG_CustomFrame_SizeFieldType[] = "fixedSize";
 const char SG_CustomFrame_FixedFrameSize[] = "frameSize";
+const char SG_CustomFrame_SkipBytes[] = "skipBytes";
 const char SG_CustomFrame_NumberFormat[] = "numberFormat";
 const char SG_CustomFrame_Endianness[] = "endianness";
 const char SG_CustomFrame_Checksum[] = "checksum";

@@ -53,6 +53,7 @@ public:
     QByteArray syncWord();
     SizeFieldType sizeFieldType() const;
     unsigned fixedFrameSize() const;
+    unsigned skippedBytes() const;
     bool isChecksumEnabled();
     bool isDebugModeEnabled();
     /// Save settings into a `QSettings`
@@ -69,6 +70,7 @@ signals:
     /// `0` indicates frame size byte is enabled
     void fixedFrameSizeChanged(unsigned);
     void checksumChanged(bool);
+    void skippedBytesChanged(unsigned);
     void numOfChannelsChanged(unsigned);
     void numberFormatChanged(NumberFormat);
     void debugModeChanged(bool);

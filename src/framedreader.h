@@ -59,6 +59,7 @@ private:
     bool hasSizeByte;
     bool isSizeField2B;         /// size field is 2 bytes
     unsigned frameSize;
+    unsigned skipBytes;
     bool debugModeEnabled;
 
     /// Checks the validity of syncWord and frameSize then shows an
@@ -90,6 +91,7 @@ private slots:
     void onNumOfChannelsChanged(unsigned value);
     void onSyncWordChanged(QByteArray);
     void onSizeFieldChanged(FramedReaderSettings::SizeFieldType, unsigned);
+    void onSkippedBytesChanged(unsigned);
 };
 
 #endif // FRAMEDREADER_H

@@ -81,6 +81,12 @@ FramedReaderSettings::FramedReaderSettings(QWidget *parent) :
                 emit numOfChannelsChanged(value);
             });
 
+    connect(ui->spSkipBytes, &QSpinBox::valueChanged,
+            [this](int value)
+            {
+                emit skippedBytesChanged(value);
+            });
+
     connect(ui->leSyncWord, &QLineEdit::textChanged,
             this, &FramedReaderSettings::onSyncWordEdited);
 
@@ -152,6 +158,11 @@ unsigned FramedReaderSettings::fixedFrameSize() const
     return ui->spSize->value();
 }
 
+unsigned FramedReaderSettings::skippedBytes() const
+{
+    return ui->spSkipBytes->value();
+}
+
 bool FramedReaderSettings::isChecksumEnabled()
 {
     return ui->cbChecksum->isChecked();
@@ -185,6 +196,7 @@ void FramedReaderSettings::saveSettings(QSettings* settings)
     }
     settings->setValue(SG_CustomFrame_SizeFieldType, sizeFieldStr);
     settings->setValue(SG_CustomFrame_FixedFrameSize, fixedFrameSize());
+    settings->setValue(SG_CustomFrame_SkipBytes, skippedBytes());
     settings->setValue(SG_CustomFrame_Checksum, ui->cbChecksum->isChecked());
     settings->setValue(SG_CustomFrame_DebugMode, ui->cbDebugMode->isChecked());
     settings->endGroup();
@@ -231,6 +243,8 @@ void FramedReaderSettings::loadSettings(QSettings* settings)
     // load frame size type and fixed value
     ui->spSize->setValue(
         settings->value(SG_CustomFrame_FixedFrameSize, ui->spSize->value()).toInt());
+    ui->spSkipBytes->setValue(
+        settings->value(SG_CustomFrame_SkipBytes, ui->spSkipBytes->value()).toInt());
 
     QString sizeFieldStr = settings->value(SG_CustomFrame_SizeFieldType, "").toString();
     if (sizeFieldStr == "fixed")

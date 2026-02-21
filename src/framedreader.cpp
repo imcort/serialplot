@@ -33,6 +33,7 @@ FramedReader::FramedReader(QIODevice* device, QObject* parent) :
     hasSizeByte = (_settingsWidget.sizeFieldType() != FramedReaderSettings::SizeFieldType::Fixed);
     isSizeField2B = (_settingsWidget.sizeFieldType() == FramedReaderSettings::SizeFieldType::Field2Byte);
     frameSize = _settingsWidget.fixedFrameSize();
+    skipBytes = _settingsWidget.skippedBytes();
     syncWord = _settingsWidget.syncWord();
     checksumEnabled = _settingsWidget.isChecksumEnabled();
     onNumberFormatChanged(_settingsWidget.numberFormat());
@@ -51,6 +52,9 @@ FramedReader::FramedReader(QIODevice* device, QObject* parent) :
 
     connect(&_settingsWidget, &FramedReaderSettings::sizeFieldChanged,
             this, &FramedReader::onSizeFieldChanged);
+
+    connect(&_settingsWidget, &FramedReaderSettings::skippedBytesChanged,
+            this, &FramedReader::onSkippedBytesChanged);
 
     connect(&_settingsWidget, &FramedReaderSettings::checksumChanged,
             [this](bool enabled){checksumEnabled = enabled; reset();});
@@ -127,6 +131,12 @@ void FramedReader::onNumberFormatChanged(NumberFormat numberFormat)
 
 void FramedReader::checkSettings()
 {
+    const unsigned sampleSetSize = _numChannels * sampleSize;
+    const bool payloadSizeValid =
+        (frameSize >= skipBytes) &&
+        (frameSize > skipBytes) &&
+        ((frameSize - skipBytes) % sampleSetSize == 0);
+
     // sync word is invalid (empty or missing a nibble at the end)
     if (!syncWord.size())
     {
@@ -138,7 +148,7 @@ void FramedReader::checkSettings()
     }
 
     // check if fixed frame size is multiple of a sample set size
-    if (!hasSizeByte && (frameSize % (_numChannels * sampleSize) != 0))
+    if (!hasSizeByte && !payloadSizeValid)
     {
         settingsInvalid |= FRAMESIZE_INVALID;
     }
@@ -155,8 +165,8 @@ void FramedReader::checkSettings()
     else if (settingsInvalid & FRAMESIZE_INVALID)
     {
         QString errorMessage =
-            QString("Payload size must be multiple of %1 (#channels * sample size)!")\
-            .arg(_numChannels * sampleSize);
+            QString("Payload size minus skipped bytes must be positive and multiple of %1 (#channels * sample size)!")\
+            .arg(sampleSetSize);
 
         _settingsWidget.showMessage(errorMessage, true);
     }
@@ -195,6 +205,13 @@ void FramedReader::onSizeFieldChanged(FramedReaderSettings::SizeFieldType fieldT
         isSizeField2B = (fieldType == FramedReaderSettings::SizeFieldType::Field2Byte);
     }
 
+    checkSettings();
+    reset();
+}
+
+void FramedReader::onSkippedBytesChanged(unsigned value)
+{
+    skipBytes = value;
     checkSettings();
     reset();
 }
@@ -255,16 +272,17 @@ unsigned FramedReader::readData()
             }
 
             // validate the size field
+            const unsigned sampleSetSize = _numChannels * sampleSize;
             if (frameSize == 0)
             {
                 qCritical() << "Frame size is read as 0!";
                 reset();
             }
-            else if (frameSize % (_numChannels * sampleSize) != 0)
+            else if (frameSize <= skipBytes || ((frameSize - skipBytes) % sampleSetSize != 0))
             {
                 qCritical() <<
-                    QString("Payload size is not multiple of %1 (#channels * sample size)!") \
-                    .arg(_numChannels * sampleSize);
+                    QString("Payload size minus skipped bytes must be positive and multiple of %1 (#channels * sample size)!") \
+                    .arg(sampleSetSize);
                 reset();
             }
             else
@@ -311,8 +329,21 @@ void FramedReader::readFrameDataAndCheck()
         return;
     }
 
+    if (skipBytes > 0)
+    {
+        QByteArray skipped = _device->read(skipBytes);
+        if (checksumEnabled)
+        {
+            for (char byte : skipped)
+            {
+                calcChecksum += static_cast<quint8>(byte);
+            }
+        }
+    }
+
     // a package is 1 set of samples for all channels
-    unsigned numOfPackagesToRead = frameSize / (_numChannels * sampleSize);
+    const unsigned sampleDataSize = frameSize - skipBytes;
+    unsigned numOfPackagesToRead = sampleDataSize / (_numChannels * sampleSize);
     SamplePack samples(numOfPackagesToRead, _numChannels);
     for (unsigned i = 0; i < numOfPackagesToRead; i++)
     {

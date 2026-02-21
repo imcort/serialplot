@@ -23,6 +23,7 @@
 
 #include <QSignalSpy>
 #include <QBuffer>
+#include <QSpinBox>
 #include "binarystreamreader.h"
 #include "asciireader.h"
 #include "framedreader.h"
@@ -216,6 +217,33 @@ TEST_CASE("FramedReader reads signed int24 payload", "[reader]")
     REQUIRE(sink.totalFed == 1);
     REQUIRE(sink.hasSample);
     REQUIRE(sink.lastSample == -1.0);
+}
+
+TEST_CASE("FramedReader skips leading payload bytes", "[reader]")
+{
+    QBuffer bufferDev;
+    FramedReader reader(&bufferDev);
+    reader.enable(true);
+
+    CapturingSink sink;
+    reader.connectSink(&sink);
+
+    auto* settings = dynamic_cast<FramedReaderSettings*>(reader.settingsWidget());
+    REQUIRE(settings != nullptr);
+    auto* skipBox = settings->findChild<QSpinBox*>("spSkipBytes");
+    REQUIRE(skipBox != nullptr);
+    skipBox->setValue(1);
+
+    bufferDev.open(QIODevice::ReadWrite);
+    const uint8_t data[] = {0xAA, 0xBB, 2, 0x99, 0x07};
+    bufferDev.write((const char*) data, 5);
+    bufferDev.seek(0);
+
+    QSignalSpy spy(&bufferDev, SIGNAL(readyRead()));
+    REQUIRE(spy.wait(READYREAD_TIMEOUT));
+    REQUIRE(sink.totalFed == 1);
+    REQUIRE(sink.hasSample);
+    REQUIRE(sink.lastSample == 7.0);
 }
 
 TEST_CASE("FramedReader shouldn't read when disabled", "[reader]")
