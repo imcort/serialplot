@@ -27,10 +27,29 @@
 #include "asciireader.h"
 #include "framedreader.h"
 #include "demoreader.h"
+#include "numberformatbox.h"
 
 #include "test_helpers.h"
 
 static const int READYREAD_TIMEOUT = 10; // milliseconds
+
+class CapturingSink : public TestSink
+{
+public:
+    bool hasSample = false;
+    double lastSample = 0.0;
+
+    void feedIn(const SamplePack& data) override
+    {
+        if (data.numChannels() > 0 && data.numSamples() > 0)
+        {
+            hasSample = true;
+            lastSample = data.data(0)[data.numSamples()-1];
+        }
+
+        TestSink::feedIn(data);
+    }
+};
 
 TEST_CASE("reading data with BinaryStreamReader", "[reader]")
 {
@@ -143,6 +162,60 @@ TEST_CASE("reading data with FramedReader", "[reader]")
     QSignalSpy spy(&bufferDev, SIGNAL(readyRead()));
     REQUIRE(spy.wait(READYREAD_TIMEOUT));
     REQUIRE(sink.totalFed == 4);
+}
+
+TEST_CASE("FramedReader reads uint24 payload", "[reader]")
+{
+    QBuffer bufferDev;
+    FramedReader reader(&bufferDev);
+    reader.enable(true);
+
+    CapturingSink sink;
+    reader.connectSink(&sink);
+
+    auto* settings = dynamic_cast<FramedReaderSettings*>(reader.settingsWidget());
+    REQUIRE(settings != nullptr);
+    auto* nfBox = settings->findChild<NumberFormatBox*>("nfBox");
+    REQUIRE(nfBox != nullptr);
+    nfBox->setSelection(NumberFormat_uint24);
+
+    bufferDev.open(QIODevice::ReadWrite);
+    const uint8_t data[] = {0xAA, 0xBB, 3, 0x56, 0x34, 0x12};
+    bufferDev.write((const char*) data, 6);
+    bufferDev.seek(0);
+
+    QSignalSpy spy(&bufferDev, SIGNAL(readyRead()));
+    REQUIRE(spy.wait(READYREAD_TIMEOUT));
+    REQUIRE(sink.totalFed == 1);
+    REQUIRE(sink.hasSample);
+    REQUIRE(sink.lastSample == 1193046.0);
+}
+
+TEST_CASE("FramedReader reads signed int24 payload", "[reader]")
+{
+    QBuffer bufferDev;
+    FramedReader reader(&bufferDev);
+    reader.enable(true);
+
+    CapturingSink sink;
+    reader.connectSink(&sink);
+
+    auto* settings = dynamic_cast<FramedReaderSettings*>(reader.settingsWidget());
+    REQUIRE(settings != nullptr);
+    auto* nfBox = settings->findChild<NumberFormatBox*>("nfBox");
+    REQUIRE(nfBox != nullptr);
+    nfBox->setSelection(NumberFormat_int24);
+
+    bufferDev.open(QIODevice::ReadWrite);
+    const uint8_t data[] = {0xAA, 0xBB, 3, 0xFF, 0xFF, 0xFF};
+    bufferDev.write((const char*) data, 6);
+    bufferDev.seek(0);
+
+    QSignalSpy spy(&bufferDev, SIGNAL(readyRead()));
+    REQUIRE(spy.wait(READYREAD_TIMEOUT));
+    REQUIRE(sink.totalFed == 1);
+    REQUIRE(sink.hasSample);
+    REQUIRE(sink.lastSample == -1.0);
 }
 
 TEST_CASE("FramedReader shouldn't read when disabled", "[reader]")

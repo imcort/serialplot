@@ -53,6 +53,16 @@
     </widget>
    </item>
    <item>
+    <widget class="QRadioButton" name="rbUint24">
+     <property name="toolTip">
+      <string>unsigned 3 bytes integer</string>
+     </property>
+     <property name="text">
+      <string>uint24</string>
+     </property>
+    </widget>
+   </item>
+   <item>
     <widget class="QRadioButton" name="rbUint32">
      <property name="toolTip">
       <string>unsigned 4 bytes integer</string>
@@ -79,6 +89,16 @@
      </property>
      <property name="text">
       <string>int16</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QRadioButton" name="rbInt24">
+     <property name="toolTip">
+      <string>signed 3 bytes integer</string>
+     </property>
+     <property name="text">
+      <string>int24</string>
      </property>
     </widget>
    </item>

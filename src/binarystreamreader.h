@@ -51,6 +51,8 @@ private:
 
     /// points to the readSampleAs function for currently selected number format
     double (BinaryStreamReader::*readSample)();
+    double readSampleAsUint24();
+    double readSampleAsInt24();
 
     /**
      * Reads 1 sample from the device in given format.

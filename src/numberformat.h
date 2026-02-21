@@ -26,9 +26,11 @@ enum NumberFormat
 {
     NumberFormat_uint8,
     NumberFormat_uint16,
+    NumberFormat_uint24,
     NumberFormat_uint32,
     NumberFormat_int8,
     NumberFormat_int16,
+    NumberFormat_int24,
     NumberFormat_int32,
     NumberFormat_float,
     NumberFormat_double,

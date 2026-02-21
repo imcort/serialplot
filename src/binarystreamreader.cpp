@@ -77,9 +77,17 @@ void BinaryStreamReader::onNumberFormatChanged(NumberFormat numberFormat)
             sampleSize = sizeof(quint16);
             readSample = &BinaryStreamReader::readSampleAs<quint16>;
             break;
+        case NumberFormat_uint24:
+            sampleSize = 3;
+            readSample = &BinaryStreamReader::readSampleAsUint24;
+            break;
         case NumberFormat_int16:
             sampleSize = sizeof(qint16);
             readSample = &BinaryStreamReader::readSampleAs<qint16>;
+            break;
+        case NumberFormat_int24:
+            sampleSize = 3;
+            readSample = &BinaryStreamReader::readSampleAsInt24;
             break;
         case NumberFormat_uint32:
             sampleSize = sizeof(quint32);
@@ -180,6 +188,37 @@ template<typename T> double BinaryStreamReader::readSampleAs()
     }
 
     return double(data);
+}
+
+double BinaryStreamReader::readSampleAsUint24()
+{
+    char data[3];
+    _device->read(data, sizeof(data));
+
+    quint32 value;
+    if (_settingsWidget.endianness() == LittleEndian)
+    {
+        value = static_cast<quint8>(data[0]) |
+                (static_cast<quint8>(data[1]) << 8) |
+                (static_cast<quint8>(data[2]) << 16);
+    }
+    else
+    {
+        value = static_cast<quint8>(data[2]) |
+                (static_cast<quint8>(data[1]) << 8) |
+                (static_cast<quint8>(data[0]) << 16);
+    }
+
+    return static_cast<double>(value);
+}
+
+double BinaryStreamReader::readSampleAsInt24()
+{
+    const quint32 value = static_cast<quint32>(readSampleAsUint24());
+    const qint32 signedValue = (value & 0x800000U)
+        ? static_cast<qint32>(value | 0xFF000000U)
+        : static_cast<qint32>(value);
+    return static_cast<double>(signedValue);
 }
 
 void BinaryStreamReader::saveSettings(QSettings* settings)

@@ -75,6 +75,8 @@ private:
     void reset();    /// Resets the reading state. Used in case of error or setting change.
     /// points to the readSampleAs function for currently selected number format
     double (FramedReader::*readSample)();
+    double readSampleAsUint24();
+    double readSampleAsInt24();
     template<typename T> double readSampleAs();
     /// reads payload portion of the frame, calculates checksum and commits data
     /// @note should be called only if there are enough bytes on device

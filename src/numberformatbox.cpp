@@ -29,9 +29,11 @@ NumberFormatBox::NumberFormatBox(QWidget *parent) :
     // setup buttons
     buttonGroup.addButton(ui->rbUint8,  NumberFormat_uint8);
     buttonGroup.addButton(ui->rbUint16, NumberFormat_uint16);
+    buttonGroup.addButton(ui->rbUint24, NumberFormat_uint24);
     buttonGroup.addButton(ui->rbUint32, NumberFormat_uint32);
     buttonGroup.addButton(ui->rbInt8,   NumberFormat_int8);
     buttonGroup.addButton(ui->rbInt16,  NumberFormat_int16);
+    buttonGroup.addButton(ui->rbInt24,  NumberFormat_int24);
     buttonGroup.addButton(ui->rbInt32,  NumberFormat_int32);
     buttonGroup.addButton(ui->rbFloat,  NumberFormat_float);
     buttonGroup.addButton(ui->rbDouble,  NumberFormat_double);
