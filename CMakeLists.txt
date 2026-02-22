@@ -121,8 +121,13 @@ qt_add_executable(${PROGRAM_NAME} WIN32
   )
 
 if (APPLE)
+  set(MACOS_BUNDLE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/misc/serialplot.png")
+  set_source_files_properties(${MACOS_BUNDLE_ICON} PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources")
+  target_sources(${PROGRAM_NAME} PRIVATE ${MACOS_BUNDLE_ICON})
   set_target_properties(${PROGRAM_NAME} PROPERTIES
-    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/misc/macos/Info.plist.in")
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/misc/macos/Info.plist.in"
+    MACOSX_BUNDLE_ICON_FILE "serialplot.png")
 endif()
 
 # Use the Widgets module from Qt 5.
