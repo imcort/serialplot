@@ -23,7 +23,7 @@
 #
 #-------------------------------------------------
 
-QT       += core gui serialport network svg
+QT       += core gui serialport network svg bluetooth
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
@@ -88,6 +88,7 @@ SOURCES += \
     src/barscaledraw.cpp \
     src/numberformat.cpp \
     src/updatechecker.cpp \
+    src/blegattdevice.cpp \
     src/versionnumber.cpp \
     src/updatecheckdialog.cpp \
     src/samplepack.cpp \
@@ -134,6 +135,7 @@ HEADERS += \
     src/numberformat.h \
     src/recordpanel.h \
     src/updatechecker.h \
+    src/blegattdevice.h \
     src/updatecheckdialog.h \
     src/demoreadersettings.h \
     src/datatextview.h \
@@ -189,4 +191,9 @@ RESOURCES += misc/icons.qrc
 
 win32 {
     RESOURCES += misc/winicons.qrc
+}
+
+macx {
+    QMAKE_INFO_PLIST = misc/macos/Info.plist
+    QMAKE_TARGET_BUNDLE_PREFIX = net.ozderya
 }

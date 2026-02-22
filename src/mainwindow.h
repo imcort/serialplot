@@ -27,6 +27,7 @@
 #include <QVector>
 #include <QList>
 #include <QSerialPort>
+#include <QIODevice>
 #include <QSignalMapper>
 #include <QTimer>
 #include <QColor>
@@ -48,6 +49,7 @@
 #include "samplecounter.h"
 #include "datatextview.h"
 #include "bpslabel.h"
+#include "blegattdevice.h"
 
 namespace Ui {
 class MainWindow;
@@ -72,6 +74,7 @@ private:
     void setupAboutDialog();
 
     QSerialPort serialPort;
+    BleGattDevice bleDevice;
     PortControl portControl;
 
     unsigned int numOfSamples;

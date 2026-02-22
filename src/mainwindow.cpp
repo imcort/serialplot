@@ -65,7 +65,8 @@ MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MainWindow),
     aboutDialog(this),
-    portControl(&serialPort),
+    bleDevice(this),
+    portControl(&serialPort, &bleDevice),
     secondaryPlot(NULL),
     snapshotMan(this, &stream),
     commandPanel(&serialPort),
@@ -166,6 +167,20 @@ MainWindow::MainWindow(QWidget *parent) :
     // port control signals
     QObject::connect(&portControl, &PortControl::portToggled,
                      this, &MainWindow::onPortToggled);
+    QObject::connect(&portControl, &PortControl::deviceChanged,
+                     &commandPanel, &CommandPanel::setDevice);
+    QObject::connect(&portControl, &PortControl::deviceChanged,
+                     &dataFormatPanel, &DataFormatPanel::setDevice);
+    QObject::connect(&portControl, &PortControl::deviceChanged,
+                     [this](QIODevice* device)
+                     {
+                         QObject::disconnect(&serialPort, &QIODevice::aboutToClose,
+                                             &recordPanel, &RecordPanel::onPortClose);
+                         QObject::disconnect(&bleDevice, &QIODevice::aboutToClose,
+                                             &recordPanel, &RecordPanel::onPortClose);
+                         QObject::connect(device, &QIODevice::aboutToClose,
+                                          &recordPanel, &RecordPanel::onPortClose);
+                     });
 
     // plot control signals
     connect(&plotControlPanel, &PlotControlPanel::numOfSamplesChanged,
@@ -221,7 +236,7 @@ MainWindow::MainWindow(QWidget *parent) :
                          }
                      });
 
-    connect(&serialPort, &QIODevice::aboutToClose,
+    connect(portControl.activeDevice(), &QIODevice::aboutToClose,
             &recordPanel, &RecordPanel::onPortClose);
 
     // init plot
@@ -295,6 +310,7 @@ MainWindow::~MainWindow()
     {
         serialPort.close();
     }
+    bleDevice.disconnectFromDevice();
 
     delete plotMan;
 

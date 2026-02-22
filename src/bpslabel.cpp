@@ -50,7 +50,7 @@ void BPSLabel::onBpsTimeout()
     unsigned bits = bytesRead * 8;
     unsigned maxBps = _portControl->maxBitRate();
     QString str;
-    if (bits >= maxBps)
+    if (maxBps > 0 && bits >= maxBps)
     {
         // TODO: an icon for bps warning
         str = QString(tr("!%1/%2bps")).arg(bits).arg(maxBps);

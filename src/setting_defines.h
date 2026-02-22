@@ -48,6 +48,10 @@ const char SG_Port_Parity[] = "parity";
 const char SG_Port_DataBits[] = "dataBits";
 const char SG_Port_StopBits[] = "stopBits";
 const char SG_Port_FlowControl[] = "flowControl";
+const char SG_Port_TransportMode[] = "transportMode";
+const char SG_Port_BleServiceUuid[] = "bleServiceUuid";
+const char SG_Port_BleNotifyUuid[] = "bleNotifyUuid";
+const char SG_Port_BleWriteUuid[] = "bleWriteUuid";
 
 // data format panel keys
 const char SG_DataFormat_Format[] = "format";

@@ -23,14 +23,23 @@
 #include <QWidget>
 #include <QButtonGroup>
 #include <QSerialPort>
+#include <QIODevice>
 #include <QStringList>
 #include <QToolBar>
 #include <QAction>
 #include <QComboBox>
+#include <QLineEdit>
 #include <QSettings>
 #include <QTimer>
+#include <QList>
+#include <QGroupBox>
+#include <QLabel>
+
+#include <QBluetoothDeviceInfo>
+#include <QBluetoothUuid>
 
 #include "portlist.h"
+#include "blegattdevice.h"
 
 namespace Ui {
 class PortControl;
@@ -41,11 +50,15 @@ class PortControl : public QWidget
     Q_OBJECT
 
 public:
-    explicit PortControl(QSerialPort* port, QWidget* parent = 0);
+    explicit PortControl(QSerialPort* serialPort,
+                         BleGattDevice* bleDevice,
+                         QWidget* parent = 0);
     ~PortControl();
 
     QSerialPort* serialPort;
+    BleGattDevice* bleDevice;
     QToolBar* toolBar();
+    QIODevice* activeDevice();
 
     void selectPort(QString portName);
     void selectBaudrate(QString baudRate);
@@ -71,12 +84,35 @@ private:
     QAction loadPortListAction;
     QComboBox tbPortList;
     PortList portList;
+    enum class TransportMode
+    {
+        Serial = 0,
+        BLE = 1
+    };
+    TransportMode transportMode;
+    QList<QBluetoothDeviceInfo> scannedBleDevices;
+
+    QComboBox* cbTransport;
+    QComboBox* cbBleDevice;
+    QGroupBox* gbBle;
+    QLabel* lbBleStatus;
+    QLineEdit* leBleServiceUuid;
+    QLineEdit* leBleNotifyUuid;
+    QLineEdit* leBleWriteUuid;
+    QAction scanBleAction;
 
     /// Used to refresh pinout signal leds periodically
     QTimer pinUpdateTimer;
 
     /// Returns the currently selected (entered) "portName" in the UI
     QString selectedPortName();
+    QBluetoothUuid parseUuid(const QString& text);
+    void applyModeUi();
+    bool isSerialMode() const;
+    void refreshBleDeviceList();
+    void connectBle();
+    void disconnectBle();
+    QString bleDeviceDisplayName(const QBluetoothDeviceInfo& info) const;
     /// Returns currently selected parity as text to be saved in settings
     QString currentParityText();
     /// Returns currently selected flow control as text to be saved in settings
@@ -99,9 +135,14 @@ private slots:
     void onTbPortListActivated(int index);
     void onPortError(QSerialPort::SerialPortError error);
     void updatePinLeds(void);
+    void onTransportChanged(int index);
+    void scanBleDevices();
+    void onBleConnectedChanged(bool connected);
+    void onBleScanFinished();
 
 signals:
     void portToggled(bool open);
+    void deviceChanged(QIODevice* device);
 };
 
 #endif // PORTCONTROL_H

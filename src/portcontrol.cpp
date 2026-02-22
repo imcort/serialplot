@@ -1,5 +1,5 @@
 /*
-  Copyright © 2025 Hasan Yavuz Özderya
+  Copyright © 2026 Hasan Yavuz Özderya
 
   This file is part of serialplot.
 
@@ -20,16 +20,28 @@
 #include "portcontrol.h"
 #include "ui_portcontrol.h"
 
-#include <QSerialPortInfo>
+#include <QFormLayout>
+#include <QBluetoothAddress>
+#include <QFrame>
+#include <QGridLayout>
+#include <QGroupBox>
+#include <QHBoxLayout>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMap>
+#include <QPushButton>
+#include <QSerialPortInfo>
+#include <QVBoxLayout>
 #include <QtDebug>
 
 #include "setting_defines.h"
 
 #define TBPORTLIST_MINWIDTH (200)
+
+static const char* DEFAULT_BLE_SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
+static const char* DEFAULT_BLE_NOTIFY_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
+static const char* DEFAULT_BLE_WRITE_UUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
 
 // setting mappings
 const QMap<QSerialPort::Parity, QString> paritySettingMap({
@@ -38,18 +50,55 @@ const QMap<QSerialPort::Parity, QString> paritySettingMap({
         {QSerialPort::EvenParity, "even"},
     });
 
-PortControl::PortControl(QSerialPort* port, QWidget* parent) :
+PortControl::PortControl(QSerialPort* serialPort,
+                         BleGattDevice* bleDevice,
+                         QWidget* parent) :
     QWidget(parent),
     ui(new Ui::PortControl),
     portToolBar("Port Toolbar"),
     openAction("Open", this),
-    loadPortListAction("↺", this)
+    loadPortListAction("↺", this),
+    cbTransport(nullptr),
+    cbBleDevice(nullptr),
+    gbBle(nullptr),
+    lbBleStatus(nullptr),
+    leBleServiceUuid(nullptr),
+    leBleNotifyUuid(nullptr),
+    leBleWriteUuid(nullptr),
+    scanBleAction("Scan BLE", this)
 {
     ui->setupUi(this);
 
-    serialPort = port;
-    connect(serialPort, &QSerialPort::errorOccurred,
+    this->serialPort = serialPort;
+    this->bleDevice = bleDevice;
+    transportMode = TransportMode::Serial;
+
+    connect(this->serialPort, &QSerialPort::errorOccurred,
             this, &PortControl::onPortError);
+    connect(this->bleDevice, &BleGattDevice::connectedChanged,
+            this, &PortControl::onBleConnectedChanged);
+    connect(this->bleDevice, &BleGattDevice::devicesChanged,
+            this, &PortControl::refreshBleDeviceList);
+    connect(this->bleDevice, &BleGattDevice::scanFinished,
+            this, &PortControl::onBleScanFinished);
+    connect(this->bleDevice, &BleGattDevice::scanError,
+            [this](QString msg)
+            {
+                if (lbBleStatus != nullptr)
+                {
+                    lbBleStatus->setText(tr("Scan failed: %1").arg(msg));
+                }
+                qWarning() << "BLE scan error:" << msg;
+            });
+    connect(this->bleDevice, &BleGattDevice::errorOccurred,
+            [this](QString msg)
+            {
+                if (lbBleStatus != nullptr)
+                {
+                    lbBleStatus->setText(tr("BLE error: %1").arg(msg));
+                }
+                qWarning() << "BLE error:" << msg;
+            });
 
     // setup actions
     openAction.setCheckable(true);
@@ -58,9 +107,24 @@ PortControl::PortControl(QSerialPort* port, QWidget* parent) :
     QObject::connect(&openAction, &QAction::triggered,
                      this, &PortControl::openActionTriggered);
 
-    loadPortListAction.setToolTip("Reload port list");
+    loadPortListAction.setToolTip("Reload list");
     QObject::connect(&loadPortListAction, &QAction::triggered,
-                     [this](bool checked){loadPortList();});
+                     [this](bool checked)
+                     {
+                         Q_UNUSED(checked);
+                         if (isSerialMode())
+                         {
+                             loadPortList();
+                         }
+                         else
+                         {
+                             scanBleDevices();
+                         }
+                     });
+
+    scanBleAction.setToolTip("Scan BLE devices");
+    connect(&scanBleAction, &QAction::triggered,
+            this, &PortControl::scanBleDevices);
 
     // setup toolbar
     portToolBar.addWidget(&tbPortList);
@@ -92,7 +156,6 @@ PortControl::PortControl(QSerialPort* port, QWidget* parent) :
     parityButtons.addButton(ui->rbNoParity, (int) QSerialPort::NoParity);
     parityButtons.addButton(ui->rbEvenParity, (int) QSerialPort::EvenParity);
     parityButtons.addButton(ui->rbOddParity, (int) QSerialPort::OddParity);
-
     QObject::connect(&parityButtons, &QButtonGroup::idClicked,
                      this, &PortControl::selectParity);
 
@@ -101,25 +164,19 @@ PortControl::PortControl(QSerialPort* port, QWidget* parent) :
     dataBitsButtons.addButton(ui->rb7Bits, (int) QSerialPort::Data7);
     dataBitsButtons.addButton(ui->rb6Bits, (int) QSerialPort::Data6);
     dataBitsButtons.addButton(ui->rb5Bits, (int) QSerialPort::Data5);
-
     QObject::connect(&dataBitsButtons, &QButtonGroup::idClicked,
                      this, &PortControl::selectDataBits);
 
     // setup stop bits selection buttons
     stopBitsButtons.addButton(ui->rb1StopBit, (int) QSerialPort::OneStop);
     stopBitsButtons.addButton(ui->rb2StopBit, (int) QSerialPort::TwoStop);
-
     QObject::connect(&stopBitsButtons, &QButtonGroup::idClicked,
                      this, &PortControl::selectStopBits);
 
     // setup flow control selection buttons
-    flowControlButtons.addButton(ui->rbNoFlowControl,
-                                 (int) QSerialPort::NoFlowControl);
-    flowControlButtons.addButton(ui->rbHardwareControl,
-                                 (int) QSerialPort::HardwareControl);
-    flowControlButtons.addButton(ui->rbSoftwareControl,
-                                 (int) QSerialPort::SoftwareControl);
-
+    flowControlButtons.addButton(ui->rbNoFlowControl, (int) QSerialPort::NoFlowControl);
+    flowControlButtons.addButton(ui->rbHardwareControl, (int) QSerialPort::HardwareControl);
+    flowControlButtons.addButton(ui->rbSoftwareControl, (int) QSerialPort::SoftwareControl);
     QObject::connect(&flowControlButtons, &QButtonGroup::idClicked,
                      this, &PortControl::selectFlowControl);
 
@@ -132,9 +189,9 @@ PortControl::PortControl(QSerialPort* port, QWidget* parent) :
             {
                 // toggle DTR
                 ui->ledDTR->toggle();
-                if (serialPort->isOpen())
+                if (this->serialPort->isOpen())
                 {
-                    serialPort->setDataTerminalReady(ui->ledDTR->isOn());
+                    this->serialPort->setDataTerminalReady(ui->ledDTR->isOn());
                 }
             });
 
@@ -142,9 +199,9 @@ PortControl::PortControl(QSerialPort* port, QWidget* parent) :
             {
                 // toggle RTS
                 ui->ledRTS->toggle();
-                if (serialPort->isOpen())
+                if (this->serialPort->isOpen())
                 {
-                    serialPort->setRequestToSend(ui->ledRTS->isOn());
+                    this->serialPort->setRequestToSend(ui->ledRTS->isOn());
                 }
             });
 
@@ -160,6 +217,49 @@ PortControl::PortControl(QSerialPort* port, QWidget* parent) :
     loadPortList();
     loadBaudRateList();
     ui->cbBaudRate->setCurrentIndex(ui->cbBaudRate->findText("9600"));
+
+    // add transport and BLE widgets
+    auto serialGrid = ui->gridLayout;
+    auto transportLabel = new QLabel(tr("Transport:"), this);
+    cbTransport = new QComboBox(this);
+    cbTransport->addItem(tr("Serial"));
+    cbTransport->addItem(tr("BLE"));
+    connect(cbTransport, &QComboBox::currentIndexChanged,
+            this, &PortControl::onTransportChanged);
+    serialGrid->addWidget(transportLabel, 2, 0);
+    serialGrid->addWidget(cbTransport, 2, 1);
+
+    gbBle = new QGroupBox(tr("BLE (GATT)"), this);
+    auto bleLayout = new QVBoxLayout(gbBle);
+    auto deviceRow = new QHBoxLayout();
+    cbBleDevice = new QComboBox(gbBle);
+    cbBleDevice->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    auto pbScan = new QPushButton(tr("Scan"), gbBle);
+    connect(pbScan, &QPushButton::clicked,
+            this, &PortControl::scanBleDevices);
+    deviceRow->addWidget(cbBleDevice, 1);
+    deviceRow->addWidget(pbScan);
+    bleLayout->addLayout(deviceRow);
+
+    auto form = new QFormLayout();
+    leBleServiceUuid = new QLineEdit(DEFAULT_BLE_SERVICE_UUID, gbBle);
+    leBleNotifyUuid = new QLineEdit(DEFAULT_BLE_NOTIFY_UUID, gbBle);
+    leBleWriteUuid = new QLineEdit(DEFAULT_BLE_WRITE_UUID, gbBle);
+    leBleServiceUuid->setPlaceholderText(DEFAULT_BLE_SERVICE_UUID);
+    leBleNotifyUuid->setPlaceholderText(DEFAULT_BLE_NOTIFY_UUID);
+    leBleWriteUuid->setPlaceholderText(DEFAULT_BLE_WRITE_UUID);
+    form->addRow(tr("Service UUID:"), leBleServiceUuid);
+    form->addRow(tr("Notify UUID:"), leBleNotifyUuid);
+    form->addRow(tr("Write UUID:"), leBleWriteUuid);
+    bleLayout->addLayout(form);
+
+    lbBleStatus = new QLabel(tr("Idle"), gbBle);
+    bleLayout->addWidget(lbBleStatus);
+
+    static_cast<QVBoxLayout*>(ui->verticalLayout_3)->addWidget(gbBle);
+
+    applyModeUi();
+    emit deviceChanged(activeDevice());
 }
 
 PortControl::~PortControl()
@@ -200,6 +300,11 @@ void PortControl::loadBaudRateList()
 
 void PortControl::_selectBaudRate(QString baudRate)
 {
+    if (!isSerialMode())
+    {
+        return;
+    }
+
     if (serialPort->isOpen())
     {
         if (!serialPort->setBaudRate(baudRate.toInt()))
@@ -211,7 +316,7 @@ void PortControl::_selectBaudRate(QString baudRate)
 
 void PortControl::selectParity(int parity)
 {
-    if (serialPort->isOpen())
+    if (isSerialMode() && serialPort->isOpen())
     {
         if(!serialPort->setParity((QSerialPort::Parity) parity))
         {
@@ -222,7 +327,7 @@ void PortControl::selectParity(int parity)
 
 void PortControl::selectDataBits(int dataBits)
 {
-    if (serialPort->isOpen())
+    if (isSerialMode() && serialPort->isOpen())
     {
         if(!serialPort->setDataBits((QSerialPort::DataBits) dataBits))
         {
@@ -233,7 +338,7 @@ void PortControl::selectDataBits(int dataBits)
 
 void PortControl::selectStopBits(int stopBits)
 {
-    if (serialPort->isOpen())
+    if (isSerialMode() && serialPort->isOpen())
     {
         if(!serialPort->setStopBits((QSerialPort::StopBits) stopBits))
         {
@@ -244,7 +349,7 @@ void PortControl::selectStopBits(int stopBits)
 
 void PortControl::selectFlowControl(int flowControl)
 {
-    if (serialPort->isOpen())
+    if (isSerialMode() && serialPort->isOpen())
     {
         if(!serialPort->setFlowControl((QSerialPort::FlowControl) flowControl))
         {
@@ -255,70 +360,80 @@ void PortControl::selectFlowControl(int flowControl)
 
 void PortControl::togglePort()
 {
-    if (serialPort->isOpen())
+    if (isSerialMode())
     {
-        pinUpdateTimer.stop();
-        serialPort->close();
-        qDebug() << "Closed port:" << serialPort->portName();
-        emit portToggled(false);
-    }
-    else
-    {
-        QString portName;
-        QString portText = ui->cbPortList->currentText().trimmed();
-
-        if (portText.isEmpty())
+        if (serialPort->isOpen())
         {
-            qWarning() << "Select or enter a port name!";
-            return;
-        }
-
-        // we get the port name from the edit text, which may not be
-        // in the portList if user hasn't pressed Enter
-        // Also note that, portText may be different than `portName`
-        int portIndex = portList.indexOf(portText);
-        if (portIndex < 0) // not in list, add to model and update the selections
-        {
-            portList.appendRow(new PortListItem(portText));
-            ui->cbPortList->setCurrentIndex(portList.rowCount()-1);
-            tbPortList.setCurrentIndex(portList.rowCount()-1);
-            portName = portText;
+            pinUpdateTimer.stop();
+            serialPort->close();
+            qDebug() << "Closed port:" << serialPort->portName();
+            emit portToggled(false);
         }
         else
         {
-            // get the port name from the data field
-            portName = static_cast<PortListItem*>(portList.item(portIndex))->portName();
+            QString portName;
+            QString portText = ui->cbPortList->currentText().trimmed();
+
+            if (portText.isEmpty())
+            {
+                qWarning() << "Select or enter a port name!";
+                return;
+            }
+
+            int portIndex = portList.indexOf(portText);
+            if (portIndex < 0) // not in list, add to model and update the selections
+            {
+                portList.appendRow(new PortListItem(portText));
+                ui->cbPortList->setCurrentIndex(portList.rowCount()-1);
+                tbPortList.setCurrentIndex(portList.rowCount()-1);
+                portName = portText;
+            }
+            else
+            {
+                portName = static_cast<PortListItem*>(portList.item(portIndex))->portName();
+            }
+
+            serialPort->setPortName(portName);
+
+            if (serialPort->open(QIODevice::ReadWrite))
+            {
+                _selectBaudRate(ui->cbBaudRate->currentText());
+                selectParity((QSerialPort::Parity) parityButtons.checkedId());
+                selectDataBits((QSerialPort::DataBits) dataBitsButtons.checkedId());
+                selectStopBits((QSerialPort::StopBits) stopBitsButtons.checkedId());
+                selectFlowControl((QSerialPort::FlowControl) flowControlButtons.checkedId());
+
+                serialPort->setDataTerminalReady(ui->ledDTR->isOn());
+                serialPort->setRequestToSend(ui->ledRTS->isOn());
+
+                updatePinLeds();
+                pinUpdateTimer.start();
+
+                qDebug() << "Opened port:" << serialPort->portName();
+                emit portToggled(true);
+            }
         }
-
-        serialPort->setPortName(ui->cbPortList->currentData(PortNameRole).toString());
-
-        // open port
-        if (serialPort->open(QIODevice::ReadWrite))
-        {
-            // set port settings
-            _selectBaudRate(ui->cbBaudRate->currentText());
-            selectParity((QSerialPort::Parity) parityButtons.checkedId());
-            selectDataBits((QSerialPort::DataBits) dataBitsButtons.checkedId());
-            selectStopBits((QSerialPort::StopBits) stopBitsButtons.checkedId());
-            selectFlowControl((QSerialPort::FlowControl) flowControlButtons.checkedId());
-
-            // set output signals
-            serialPort->setDataTerminalReady(ui->ledDTR->isOn());
-            serialPort->setRequestToSend(ui->ledRTS->isOn());
-
-            // update pin signals
-            updatePinLeds();
-            pinUpdateTimer.start();
-
-            qDebug() << "Opened port:" << serialPort->portName();
-            emit portToggled(true);
-        }
+        openAction.setChecked(serialPort->isOpen());
+        return;
     }
-    openAction.setChecked(serialPort->isOpen());
+
+    if (bleDevice->isOpen())
+    {
+        disconnectBle();
+    }
+    else
+    {
+        connectBle();
+    }
 }
 
 void PortControl::selectListedPort(QString portName)
 {
+    if (!isSerialMode())
+    {
+        return;
+    }
+
     // portName may be coming from combobox
     portName = portName.split(" ")[0];
 
@@ -328,17 +443,10 @@ void PortControl::selectListedPort(QString portName)
         qWarning() << "Device doesn't exist:" << portName;
     }
 
-    // has selection actually changed
-    if (portName != serialPort->portName())
+    if (portName != serialPort->portName() && serialPort->isOpen())
     {
-        // if another port is already open, close it by toggling
-        if (serialPort->isOpen())
-        {
-            togglePort();
-
-            // open new selection by toggling
-            togglePort();
-        }
+        togglePort();
+        togglePort();
     }
 }
 
@@ -346,14 +454,12 @@ QString PortControl::selectedPortName()
 {
     QString portText = ui->cbPortList->currentText();
     int portIndex = portList.indexOf(portText);
-    if (portIndex < 0) // not in the list yet
+    if (portIndex < 0)
     {
-        // return the displayed name as port name
         return portText;
     }
     else
     {
-        // get the port name from the 'port list'
         return static_cast<PortListItem*>(portList.item(portIndex))->portName();
     }
 }
@@ -363,8 +469,15 @@ QToolBar* PortControl::toolBar()
     return &portToolBar;
 }
 
+QIODevice* PortControl::activeDevice()
+{
+    return isSerialMode() ? static_cast<QIODevice*>(serialPort)
+                          : static_cast<QIODevice*>(bleDevice);
+}
+
 void PortControl::openActionTriggered(bool checked)
 {
+    Q_UNUSED(checked);
     togglePort();
 }
 
@@ -381,7 +494,6 @@ void PortControl::onTbPortListActivated(int index)
 void PortControl::onPortError(QSerialPort::SerialPortError error)
 {
 #ifdef Q_OS_UNIX
-    // For suppressing "Invalid argument" errors that happens with pseudo terminals
     auto isPtsInvalidArgErr = [this] () -> bool {
         return serialPort->portName().contains("pts/") && serialPort->errorString().contains("Invalid argument");
     };
@@ -421,7 +533,6 @@ required privileges or device is already opened by another process.";
             break;
         case QSerialPort::UnsupportedOperationError:
 #ifdef Q_OS_UNIX
-            // Qt 5.5 gives "Invalid argument" with 'UnsupportedOperationError'
             if (isPtsInvalidArgErr())
                 break;
 #endif
@@ -432,7 +543,6 @@ required privileges or device is already opened by another process.";
             break;
         case QSerialPort::UnknownError:
 #ifdef Q_OS_UNIX
-            // Qt 5.2 gives "Invalid argument" with 'UnknownError'
             if (isPtsInvalidArgErr())
                 break;
 #endif
@@ -446,6 +556,15 @@ required privileges or device is already opened by another process.";
 
 void PortControl::updatePinLeds(void)
 {
+    if (!isSerialMode())
+    {
+        ui->ledDCD->setOn(false);
+        ui->ledDSR->setOn(false);
+        ui->ledRI->setOn(false);
+        ui->ledCTS->setOn(false);
+        return;
+    }
+
     auto pins = serialPort->pinoutSignals();
     ui->ledDCD->setOn(pins & QSerialPort::DataCarrierDetectSignal);
     ui->ledDSR->setOn(pins & QSerialPort::DataSetReadySignal);
@@ -455,8 +574,7 @@ void PortControl::updatePinLeds(void)
 
 QString PortControl::currentParityText()
 {
-    return paritySettingMap.value(
-        (QSerialPort::Parity) parityButtons.checkedId());
+    return paritySettingMap.value((QSerialPort::Parity) parityButtons.checkedId());
 }
 
 QString PortControl::currentFlowControlText()
@@ -469,7 +587,7 @@ QString PortControl::currentFlowControlText()
     {
         return "software";
     }
-    else // no parity
+    else
     {
         return "none";
     }
@@ -477,8 +595,12 @@ QString PortControl::currentFlowControlText()
 
 void PortControl::selectPort(QString portName)
 {
+    transportMode = TransportMode::Serial;
+    cbTransport->setCurrentIndex((int)TransportMode::Serial);
+    applyModeUi();
+
     int portIndex = portList.indexOfName(portName);
-    if (portIndex < 0) // not in list, add to model and update the selections
+    if (portIndex < 0)
     {
         portList.appendRow(new PortListItem(portName));
         portIndex = portList.rowCount()-1;
@@ -506,7 +628,7 @@ void PortControl::selectBaudrate(QString baudRate)
 
 void PortControl::openPort()
 {
-    if (!serialPort->isOpen())
+    if (!activeDevice()->isOpen())
     {
         openAction.trigger();
     }
@@ -514,6 +636,11 @@ void PortControl::openPort()
 
 unsigned PortControl::maxBitRate() const
 {
+    if (!isSerialMode())
+    {
+        return 0;
+    }
+
     float baud = serialPort->baudRate();
     float dataBits = serialPort->dataBits();
     float parityBits = serialPort->parity() == QSerialPort::NoParity ? 0 : 1;
@@ -528,8 +655,7 @@ unsigned PortControl::maxBitRate() const
         stopBits = serialPort->stopBits();
     }
 
-    float frame_size = 1 /* start bit */ + dataBits + parityBits + stopBits;
-
+    float frame_size = 1 + dataBits + parityBits + stopBits;
     return float(baud) / frame_size;
 }
 
@@ -542,17 +668,19 @@ void PortControl::saveSettings(QSettings* settings)
     settings->setValue(SG_Port_DataBits, dataBitsButtons.checkedId());
     settings->setValue(SG_Port_StopBits, stopBitsButtons.checkedId());
     settings->setValue(SG_Port_FlowControl, currentFlowControlText());
+    settings->setValue(SG_Port_TransportMode, (int)transportMode);
+    settings->setValue(SG_Port_BleServiceUuid, leBleServiceUuid->text().trimmed());
+    settings->setValue(SG_Port_BleNotifyUuid, leBleNotifyUuid->text().trimmed());
+    settings->setValue(SG_Port_BleWriteUuid, leBleWriteUuid->text().trimmed());
     settings->endGroup();
 }
 
 void PortControl::loadSettings(QSettings* settings)
 {
-    // make sure the port is closed
-    if (serialPort->isOpen()) togglePort();
+    if (serialPort->isOpen() || bleDevice->isOpen()) togglePort();
 
     settings->beginGroup(SettingGroup_Port);
 
-    // set port name if it exists in the current list otherwise ignore
     QString portName = settings->value(SG_Port_SelectedPort, QString()).toString();
     if (!portName.isEmpty())
     {
@@ -560,9 +688,7 @@ void PortControl::loadSettings(QSettings* settings)
         if (index > -1) ui->cbPortList->setCurrentIndex(index);
     }
 
-    // load baud rate setting
-    QString baudSetting = settings->value(
-        SG_Port_BaudRate, ui->cbBaudRate->currentText()).toString();
+    QString baudSetting = settings->value(SG_Port_BaudRate, ui->cbBaudRate->currentText()).toString();
     int baudIndex = ui->cbBaudRate->findText(baudSetting);
     if (baudIndex > -1)
     {
@@ -570,7 +696,6 @@ void PortControl::loadSettings(QSettings* settings)
     }
     else
     {
-        // validate
         bool ok;
         int r = baudSetting.toUInt(&ok);
         if (ok && r > 0)
@@ -584,21 +709,17 @@ void PortControl::loadSettings(QSettings* settings)
         }
     }
 
-    // load parity setting
-    QString parityText =
-        settings->value(SG_Port_Parity, currentParityText()).toString();
+    QString parityText = settings->value(SG_Port_Parity, currentParityText()).toString();
     QSerialPort::Parity paritySetting = paritySettingMap.key(
         parityText, (QSerialPort::Parity) parityButtons.checkedId());
     parityButtons.button(paritySetting)->setChecked(true);
 
-    // load number of bits
     int dataBits = settings->value(SG_Port_DataBits, dataBitsButtons.checkedId()).toInt();
     if (dataBits >=5 && dataBits <= 8)
     {
         dataBitsButtons.button((QSerialPort::DataBits) dataBits)->setChecked(true);
     }
 
-    // load stop bits
     int stopBits = settings->value(SG_Port_StopBits, stopBitsButtons.checkedId()).toInt();
     if (stopBits == QSerialPort::OneStop)
     {
@@ -609,9 +730,7 @@ void PortControl::loadSettings(QSettings* settings)
         ui->rb2StopBit->setChecked(true);
     }
 
-    // load flow control
-    QString flowControlSetting =
-        settings->value(SG_Port_FlowControl, currentFlowControlText()).toString();
+    QString flowControlSetting = settings->value(SG_Port_FlowControl, currentFlowControlText()).toString();
     if (flowControlSetting == "hardware")
     {
         ui->rbHardwareControl->setChecked(true);
@@ -625,5 +744,213 @@ void PortControl::loadSettings(QSettings* settings)
         ui->rbNoFlowControl->setChecked(true);
     }
 
+    leBleServiceUuid->setText(settings->value(SG_Port_BleServiceUuid, DEFAULT_BLE_SERVICE_UUID).toString());
+    leBleNotifyUuid->setText(settings->value(SG_Port_BleNotifyUuid, DEFAULT_BLE_NOTIFY_UUID).toString());
+    leBleWriteUuid->setText(settings->value(SG_Port_BleWriteUuid, DEFAULT_BLE_WRITE_UUID).toString());
+
+    int modeValue = settings->value(SG_Port_TransportMode, (int)TransportMode::Serial).toInt();
+    if (modeValue != (int)TransportMode::BLE)
+    {
+        modeValue = (int)TransportMode::Serial;
+    }
+    cbTransport->setCurrentIndex(modeValue);
+    onTransportChanged(modeValue);
+
     settings->endGroup();
+}
+
+QBluetoothUuid PortControl::parseUuid(const QString& text)
+{
+    QString t = text.trimmed();
+    QBluetoothUuid uuid(t);
+    if (uuid.isNull())
+    {
+        qWarning() << "Invalid UUID:" << t;
+    }
+    return uuid;
+}
+
+void PortControl::applyModeUi()
+{
+    bool serial = isSerialMode();
+
+    // Serial area (mutually exclusive with BLE area)
+    ui->label->setVisible(serial);
+    ui->label_2->setVisible(serial);
+    ui->cbPortList->setVisible(serial);
+    ui->cbBaudRate->setVisible(serial);
+    ui->pbReloadPorts->setVisible(serial);
+
+    ui->frame->setVisible(serial);
+    ui->frame_2->setVisible(serial);
+    ui->frame_3->setVisible(serial);
+    ui->frame_4->setVisible(serial);
+    ui->pbDTR->setVisible(serial);
+    ui->pbRTS->setVisible(serial);
+    ui->ledDTR->setVisible(serial);
+    ui->ledRTS->setVisible(serial);
+    ui->ledDCD->setVisible(serial);
+    ui->ledDSR->setVisible(serial);
+    ui->ledRI->setVisible(serial);
+    ui->ledCTS->setVisible(serial);
+    ui->labDCD->setVisible(serial);
+    ui->labDSR->setVisible(serial);
+    ui->labRI->setVisible(serial);
+    ui->labCTS->setVisible(serial);
+
+    if (gbBle != nullptr)
+    {
+        gbBle->setVisible(!serial);
+    }
+
+    cbBleDevice->setEnabled(!serial);
+    leBleServiceUuid->setEnabled(!serial);
+    leBleNotifyUuid->setEnabled(!serial);
+    leBleWriteUuid->setEnabled(!serial);
+    scanBleAction.setEnabled(!serial);
+
+    loadPortListAction.setToolTip(serial ? "Reload port list" : "Scan BLE devices");
+    openAction.setText(serial ? tr("Open") : tr("Connect"));
+    openAction.setChecked(activeDevice()->isOpen());
+}
+
+bool PortControl::isSerialMode() const
+{
+    return transportMode == TransportMode::Serial;
+}
+
+void PortControl::refreshBleDeviceList()
+{
+    scannedBleDevices = bleDevice->scannedDevices();
+    QString selectedAddress = cbBleDevice->currentData().toString();
+
+    cbBleDevice->clear();
+    for (const auto& info : scannedBleDevices)
+    {
+        QString key = info.address().toString();
+        if (key.isEmpty())
+        {
+            key = info.deviceUuid().toString();
+        }
+        cbBleDevice->addItem(bleDeviceDisplayName(info), key);
+    }
+
+    int idx = cbBleDevice->findData(selectedAddress);
+    if (idx >= 0)
+    {
+        cbBleDevice->setCurrentIndex(idx);
+    }
+}
+
+void PortControl::connectBle()
+{
+    if (cbBleDevice->currentIndex() < 0 || cbBleDevice->currentIndex() >= scannedBleDevices.size())
+    {
+        qWarning() << "Select a BLE device first.";
+        return;
+    }
+
+    auto serviceUuid = parseUuid(leBleServiceUuid->text());
+    auto notifyUuid = parseUuid(leBleNotifyUuid->text());
+    auto writeUuid = parseUuid(leBleWriteUuid->text());
+    if (serviceUuid.isNull() || notifyUuid.isNull() || writeUuid.isNull())
+    {
+        qWarning() << "Invalid BLE UUID settings.";
+        return;
+    }
+
+    bleDevice->setServiceUuid(serviceUuid);
+    bleDevice->setNotifyUuid(notifyUuid);
+    bleDevice->setWriteUuid(writeUuid);
+    bleDevice->connectToDevice(scannedBleDevices[cbBleDevice->currentIndex()]);
+}
+
+void PortControl::disconnectBle()
+{
+    bleDevice->disconnectFromDevice();
+}
+
+QString PortControl::bleDeviceDisplayName(const QBluetoothDeviceInfo& info) const
+{
+    QString name = info.name().trimmed();
+    if (name.isEmpty())
+    {
+        name = tr("(Unnamed)");
+    }
+    QString address = info.address().toString();
+    if (address.isEmpty())
+    {
+        address = info.deviceUuid().toString();
+    }
+    return QString("%1 [%2]").arg(name, address);
+}
+
+void PortControl::onTransportChanged(int index)
+{
+    TransportMode newMode = index == (int)TransportMode::BLE ? TransportMode::BLE : TransportMode::Serial;
+    if (newMode == transportMode)
+    {
+        applyModeUi();
+        emit deviceChanged(activeDevice());
+        return;
+    }
+
+    if (activeDevice()->isOpen())
+    {
+        togglePort();
+    }
+
+    transportMode = newMode;
+    applyModeUi();
+
+    if (!isSerialMode())
+    {
+        scanBleDevices();
+    }
+
+    emit deviceChanged(activeDevice());
+}
+
+void PortControl::scanBleDevices()
+{
+    if (isSerialMode())
+    {
+        return;
+    }
+
+    if (bleDevice->isScanning())
+    {
+        bleDevice->stopScan();
+        if (lbBleStatus != nullptr)
+        {
+            lbBleStatus->setText(tr("Scan canceled."));
+        }
+        return;
+    }
+
+    cbBleDevice->clear();
+    scannedBleDevices.clear();
+    if (lbBleStatus != nullptr)
+    {
+        lbBleStatus->setText(tr("Scanning BLE devices..."));
+    }
+    bleDevice->startScan();
+}
+
+void PortControl::onBleConnectedChanged(bool connected)
+{
+    openAction.setChecked(connected);
+    emit portToggled(connected);
+}
+
+void PortControl::onBleScanFinished()
+{
+    refreshBleDeviceList();
+    if (lbBleStatus != nullptr)
+    {
+        lbBleStatus->setText(
+            scannedBleDevices.isEmpty()
+                ? tr("No BLE device found.")
+                : tr("Found %1 BLE device(s).").arg(scannedBleDevices.size()));
+    }
 }

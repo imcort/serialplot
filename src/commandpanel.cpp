@@ -24,7 +24,7 @@
 #include "ui_commandpanel.h"
 #include "setting_defines.h"
 
-CommandPanel::CommandPanel(QSerialPort* port, QWidget *parent) :
+CommandPanel::CommandPanel(QIODevice* port, QWidget *parent) :
     QWidget(parent),
     ui(new Ui::CommandPanel),
     _menu(tr("&Commands")), _newCommandAction(tr("&New Command"), this)
@@ -96,6 +96,11 @@ void CommandPanel::sendCommand(QByteArray command)
     {
         qCritical() << "Send command failed!";
     }
+}
+
+void CommandPanel::setDevice(QIODevice* device)
+{
+    serialPort = device;
 }
 
 QMenu* CommandPanel::menu()

@@ -25,7 +25,7 @@
 
 #include "setting_defines.h"
 
-DataFormatPanel::DataFormatPanel(QSerialPort* port, QWidget *parent) :
+DataFormatPanel::DataFormatPanel(QIODevice* port, QWidget *parent) :
     QWidget(parent),
     ui(new Ui::DataFormatPanel),
     bsReader(port, this),
@@ -199,4 +199,13 @@ void DataFormatPanel::loadSettings(QSettings* settings)
     bsReader.loadSettings(settings);
     asciiReader.loadSettings(settings);
     framedReader.loadSettings(settings);
+}
+
+void DataFormatPanel::setDevice(QIODevice* device)
+{
+    serialPort = device;
+    bsReader.setDevice(device);
+    asciiReader.setDevice(device);
+    framedReader.setDevice(device);
+    demoReader.setDevice(device);
 }

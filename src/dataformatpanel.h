@@ -23,7 +23,7 @@
 #include <stdint.h>
 #include <QWidget>
 #include <QButtonGroup>
-#include <QSerialPort>
+#include <QIODevice>
 #include <QList>
 #include <QSettings>
 #include <QtGlobal>
@@ -44,7 +44,7 @@ class DataFormatPanel : public QWidget
     Q_OBJECT
 
 public:
-    explicit DataFormatPanel(QSerialPort* port, QWidget* parent = 0);
+    explicit DataFormatPanel(QIODevice* port, QWidget* parent = 0);
     ~DataFormatPanel();
 
     /// Returns currently selected number of channels
@@ -57,6 +57,7 @@ public:
     void saveSettings(QSettings* settings);
     /// Loads data format panel settings from a `QSettings`.
     void loadSettings(QSettings* settings);
+    void setDevice(QIODevice* device);
 
 public slots:
     void pause(bool);
@@ -70,7 +71,7 @@ private:
     Ui::DataFormatPanel *ui;
     QButtonGroup readerSelectButtons;
 
-    QSerialPort* serialPort;
+    QIODevice* serialPort;
 
     BinaryStreamReader bsReader;
     AsciiReader asciiReader;

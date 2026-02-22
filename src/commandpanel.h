@@ -21,7 +21,7 @@
 #define COMMANDPANEL_H
 
 #include <QWidget>
-#include <QSerialPort>
+#include <QIODevice>
 #include <QByteArray>
 #include <QList>
 #include <QMenu>
@@ -39,7 +39,7 @@ class CommandPanel : public QWidget
     Q_OBJECT
 
 public:
-    explicit CommandPanel(QSerialPort* port, QWidget *parent = 0);
+    explicit CommandPanel(QIODevice* port, QWidget *parent = 0);
     ~CommandPanel();
 
     QMenu* menu();
@@ -51,6 +51,7 @@ public:
     void loadSettings(QSettings* settings);
     /// Number of commands
     unsigned numOfCommands();
+    void setDevice(QIODevice* device);
 
 signals:
     // emitted when user tries to send an empty command
@@ -58,7 +59,7 @@ signals:
 
 private:
     Ui::CommandPanel *ui;
-    QSerialPort* serialPort;
+    QIODevice* serialPort;
     QMenu _menu;
     QAction _newCommandAction;
     QList<CommandWidget*> commands;

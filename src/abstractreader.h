@@ -52,6 +52,9 @@ public:
     /// Read and 'zero' the byte counter
     unsigned getBytesRead();
 
+    /// Sets active input device.
+    void setDevice(QIODevice* device);
+
 signals:
     // TODO: should we keep this?
     void numOfChannelsChanged(unsigned);
@@ -82,6 +85,7 @@ protected:
 
 private:
     unsigned bytesRead;
+    bool _enabled;
 
 private slots:
     void onDataReady();

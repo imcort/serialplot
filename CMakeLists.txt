@@ -31,7 +31,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/modules/")
 
 # Find the QtWidgets library
-find_package(Qt6 REQUIRED COMPONENTS Widgets SerialPort Network Svg)
+find_package(Qt6 REQUIRED COMPONENTS Widgets SerialPort Network Svg Bluetooth)
 qt_standard_project_setup()
 
 # If set, cmake will download Qwt over SVN, build and use it as a static library.
@@ -54,6 +54,7 @@ else (WIN32)
 endif (WIN32)
 
 qt_add_executable(${PROGRAM_NAME} WIN32
+  MACOSX_BUNDLE
   src/main.cpp
   src/mainwindow.cpp
   src/portcontrol.cpp
@@ -105,6 +106,7 @@ qt_add_executable(${PROGRAM_NAME} WIN32
   src/barscaledraw.cpp
   src/numberformat.cpp
   src/updatechecker.cpp
+  src/blegattdevice.cpp
   src/versionnumber.cpp
   src/updatecheckdialog.cpp
   src/samplepack.cpp
@@ -118,9 +120,18 @@ qt_add_executable(${PROGRAM_NAME} WIN32
   ${RES_FILES}
   )
 
+if (APPLE)
+  set_target_properties(${PROGRAM_NAME} PROPERTIES
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/misc/macos/Info.plist.in")
+endif()
+
 # Use the Widgets module from Qt 5.
 target_link_libraries(${PROGRAM_NAME}
-  PRIVATE ${QWT_LIBRARY} Qt6::Widgets Qt6::SerialPort Qt6::Network Qt6::Svg)
+  PRIVATE ${QWT_LIBRARY} Qt6::Widgets Qt6::SerialPort Qt6::Network Qt6::Svg Qt6::Bluetooth)
+
+if (APPLE AND TARGET Qt6::QDarwinBluetoothPermissionPlugin)
+  target_link_libraries(${PROGRAM_NAME} PRIVATE Qt6::QDarwinBluetoothPermissionPlugin)
+endif()
 
 if (BUILD_QWT)
   add_dependencies(${PROGRAM_NAME} QWT)
@@ -231,6 +242,7 @@ set(CPACK_DEBIAN_PACKAGE_DEPENDS
   "libqt6widgets6t64 (>= 6.4.2), \
 libqt6svg6 (>= 6.4.2), \
 libqt6serialport6 (>= 6.4.2), \
+libqt6bluetooth6 (>= 6.4.2), \
 libqt6network6t64 (>= 6.4.2), \
 libc6 (>= 2.39)")
 set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "Small and simple software for plotting data from serial port

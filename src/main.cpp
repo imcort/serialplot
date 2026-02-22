@@ -20,6 +20,9 @@
 #include <QApplication>
 #include <QtGlobal>
 #include <QIcon>
+#include <QCoreApplication>
+#include <QPermission>
+#include <QBluetoothPermission>
 #include <iostream>
 
 #include "mainwindow.h"
@@ -77,6 +80,17 @@ int main(int argc, char *argv[])
 #ifdef Q_OS_WIN
     QIcon::setFallbackSearchPaths(QIcon::fallbackSearchPaths() << ":icons");
     QIcon::setThemeName("tango");
+#endif
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    QBluetoothPermission btPermission;
+    btPermission.setCommunicationModes(QBluetoothPermission::Access);
+    auto permissionStatus = a.checkPermission(btPermission);
+    if (permissionStatus == Qt::PermissionStatus::Undetermined)
+    {
+        a.requestPermission(
+            btPermission, &a, [](const QPermission&) {});
+    }
 #endif
 
     qInstallMessageHandler(messageHandler);

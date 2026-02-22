@@ -24,6 +24,7 @@ AbstractReader::AbstractReader(QIODevice* device, QObject* parent) :
 {
     _device = device;
     bytesRead = 0;
+    _enabled = false;
 }
 
 void AbstractReader::pause(bool enabled)
@@ -33,6 +34,7 @@ void AbstractReader::pause(bool enabled)
 
 void AbstractReader::enable(bool enabled)
 {
+    _enabled = enabled;
     if (enabled)
     {
         QObject::connect(_device, &QIODevice::readyRead,
@@ -55,4 +57,25 @@ unsigned AbstractReader::getBytesRead()
     unsigned r = bytesRead;
     bytesRead = 0;
     return r;
+}
+
+void AbstractReader::setDevice(QIODevice* device)
+{
+    if (device == _device)
+    {
+        return;
+    }
+
+    if (_enabled && _device != nullptr)
+    {
+        QObject::disconnect(_device, 0, this, 0);
+    }
+
+    _device = device;
+
+    if (_enabled && _device != nullptr)
+    {
+        QObject::connect(_device, &QIODevice::readyRead,
+                         this, &AbstractReader::onDataReady);
+    }
 }
