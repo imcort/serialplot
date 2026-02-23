@@ -243,6 +243,16 @@ void BleGattDevice::disconnectFromDevice()
     setConnected(false);
 }
 
+qint64 BleGattDevice::bytesAvailable() const
+{
+    return QIODevice::bytesAvailable() + readBuffer.size();
+}
+
+bool BleGattDevice::canReadLine() const
+{
+    return readBuffer.contains('\n') || QIODevice::canReadLine();
+}
+
 qint64 BleGattDevice::readData(char* data, qint64 maxSize)
 {
     if (maxSize <= 0 || readBuffer.isEmpty())
