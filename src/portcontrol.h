@@ -34,6 +34,7 @@
 #include <QList>
 #include <QGroupBox>
 #include <QLabel>
+#include <QPushButton>
 
 #include <QBluetoothDeviceInfo>
 #include <QBluetoothUuid>
@@ -96,6 +97,7 @@ private:
     QComboBox* cbBleDevice;
     QGroupBox* gbBle;
     QLabel* lbBleStatus;
+    QPushButton* pbBleScan;
     QLineEdit* leBleServiceUuid;
     QLineEdit* leBleNotifyUuid;
     QLineEdit* leBleWriteUuid;

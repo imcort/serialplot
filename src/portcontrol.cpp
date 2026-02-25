@@ -31,6 +31,7 @@
 #include <QLineEdit>
 #include <QMap>
 #include <QPushButton>
+#include <QUuid>
 #include <QSerialPortInfo>
 #include <QVBoxLayout>
 #include <QtDebug>
@@ -42,6 +43,16 @@
 static const char* DEFAULT_BLE_SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
 static const char* DEFAULT_BLE_NOTIFY_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
 static const char* DEFAULT_BLE_WRITE_UUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
+
+static QString bleIdText(const QBluetoothDeviceInfo& info)
+{
+    QString address = info.address().toString().trimmed();
+    if (!address.isEmpty() && address != "00:00:00:00:00:00")
+    {
+        return address;
+    }
+    return info.deviceUuid().toString(QUuid::WithoutBraces);
+}
 
 // setting mappings
 const QMap<QSerialPort::Parity, QString> paritySettingMap({
@@ -62,6 +73,7 @@ PortControl::PortControl(QSerialPort* serialPort,
     cbBleDevice(nullptr),
     gbBle(nullptr),
     lbBleStatus(nullptr),
+    pbBleScan(nullptr),
     leBleServiceUuid(nullptr),
     leBleNotifyUuid(nullptr),
     leBleWriteUuid(nullptr),
@@ -84,6 +96,10 @@ PortControl::PortControl(QSerialPort* serialPort,
     connect(this->bleDevice, &BleGattDevice::scanError,
             [this](QString msg)
             {
+                if (pbBleScan != nullptr)
+                {
+                    pbBleScan->setText(tr("Scan"));
+                }
                 if (lbBleStatus != nullptr)
                 {
                     lbBleStatus->setText(tr("Scan failed: %1").arg(msg));
@@ -234,11 +250,11 @@ PortControl::PortControl(QSerialPort* serialPort,
     auto deviceRow = new QHBoxLayout();
     cbBleDevice = new QComboBox(gbBle);
     cbBleDevice->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    auto pbScan = new QPushButton(tr("Scan"), gbBle);
-    connect(pbScan, &QPushButton::clicked,
+    pbBleScan = new QPushButton(tr("Scan"), gbBle);
+    connect(pbBleScan, &QPushButton::clicked,
             this, &PortControl::scanBleDevices);
     deviceRow->addWidget(cbBleDevice, 1);
-    deviceRow->addWidget(pbScan);
+    deviceRow->addWidget(pbBleScan);
     bleLayout->addLayout(deviceRow);
 
     auto form = new QFormLayout();
@@ -807,6 +823,10 @@ void PortControl::applyModeUi()
     leBleServiceUuid->setEnabled(!serial);
     leBleNotifyUuid->setEnabled(!serial);
     leBleWriteUuid->setEnabled(!serial);
+    if (pbBleScan != nullptr)
+    {
+        pbBleScan->setEnabled(!serial);
+    }
     scanBleAction.setEnabled(!serial);
 
     loadPortListAction.setToolTip(serial ? "Reload port list" : "Scan BLE devices");
@@ -827,11 +847,7 @@ void PortControl::refreshBleDeviceList()
     cbBleDevice->clear();
     for (const auto& info : scannedBleDevices)
     {
-        QString key = info.address().toString();
-        if (key.isEmpty())
-        {
-            key = info.deviceUuid().toString();
-        }
+        QString key = bleIdText(info);
         cbBleDevice->addItem(bleDeviceDisplayName(info), key);
     }
 
@@ -877,10 +893,10 @@ QString PortControl::bleDeviceDisplayName(const QBluetoothDeviceInfo& info) cons
     {
         name = tr("(Unnamed)");
     }
-    QString address = info.address().toString();
+    QString address = bleIdText(info);
     if (address.isEmpty())
     {
-        address = info.deviceUuid().toString();
+        address = tr("Unknown");
     }
     return QString("%1 [%2]").arg(name, address);
 }
@@ -903,11 +919,6 @@ void PortControl::onTransportChanged(int index)
     transportMode = newMode;
     applyModeUi();
 
-    if (!isSerialMode())
-    {
-        scanBleDevices();
-    }
-
     emit deviceChanged(activeDevice());
 }
 
@@ -921,6 +932,10 @@ void PortControl::scanBleDevices()
     if (bleDevice->isScanning())
     {
         bleDevice->stopScan();
+        if (pbBleScan != nullptr)
+        {
+            pbBleScan->setText(tr("Scan"));
+        }
         if (lbBleStatus != nullptr)
         {
             lbBleStatus->setText(tr("Scan canceled."));
@@ -934,6 +949,10 @@ void PortControl::scanBleDevices()
     {
         lbBleStatus->setText(tr("Scanning BLE devices..."));
     }
+    if (pbBleScan != nullptr)
+    {
+        pbBleScan->setText(tr("Stop Scan"));
+    }
     bleDevice->startScan();
 }
 
@@ -946,6 +965,10 @@ void PortControl::onBleConnectedChanged(bool connected)
 void PortControl::onBleScanFinished()
 {
     refreshBleDeviceList();
+    if (pbBleScan != nullptr)
+    {
+        pbBleScan->setText(tr("Scan"));
+    }
     if (lbBleStatus != nullptr)
     {
         lbBleStatus->setText(
