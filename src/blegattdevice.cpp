@@ -256,6 +256,11 @@ qint64 BleGattDevice::readData(char* data, qint64 maxSize)
     return bytesToRead;
 }
 
+qint64 BleGattDevice::bytesAvailable() const
+{
+    return readBuffer.size() + QIODevice::bytesAvailable();
+}
+
 qint64 BleGattDevice::writeData(const char* data, qint64 maxSize)
 {
     if (!ready || !service || !writeChar.isValid() || maxSize <= 0)
@@ -341,15 +346,64 @@ void BleGattDevice::initService(QLowEnergyService* srv)
                     return;
                 }
 
-                service->writeDescriptor(cccd, QByteArray::fromHex("0100"));
-                open(QIODevice::ReadWrite | QIODevice::Unbuffered);
-                ready = true;
-                setConnected(true);
+                QByteArray cccdValue;
+                auto props = notifyChar.properties();
+                if (props.testFlag(QLowEnergyCharacteristic::Notify))
+                {
+                    cccdValue = QByteArray::fromHex(
+                        props.testFlag(QLowEnergyCharacteristic::Indicate) ? "0300" : "0100");
+                }
+                else if (props.testFlag(QLowEnergyCharacteristic::Indicate))
+                {
+                    cccdValue = QByteArray::fromHex("0200");
+                }
+                else
+                {
+                    emit errorOccurred(tr("Notify characteristic is neither Notify nor Indicate."));
+                    controller->disconnectFromDevice();
+                    return;
+                }
+
+                qDebug() << "BLE notify characteristic:" << notifyChar.uuid().toString()
+                         << "properties:" << Qt::hex << (int)props << Qt::dec
+                         << "cccd write:" << cccdValue.toHex();
+
+                connect(service, &QLowEnergyService::descriptorWritten, this,
+                        [this, cccd, cccdValue](const QLowEnergyDescriptor& descriptor, const QByteArray& value)
+                        {
+                            if (descriptor.uuid() != cccd.uuid())
+                            {
+                                qDebug() << "BLE descriptorWritten (other):"
+                                         << descriptor.uuid().toString()
+                                         << value.toHex();
+                                return;
+                            }
+
+                            qDebug() << "BLE CCCD descriptorWritten:"
+                                     << descriptor.uuid().toString()
+                                     << "value:" << value.toHex();
+                            if (value != cccdValue)
+                            {
+                                qWarning() << "BLE CCCD echo differs from requested value."
+                                           << "requested:" << cccdValue.toHex()
+                                           << "actual:" << value.toHex();
+                            }
+
+                            open(QIODevice::ReadWrite | QIODevice::Unbuffered);
+                            ready = true;
+                            setConnected(true);
+                        });
+
+                service->writeDescriptor(cccd, cccdValue);
             });
 
     connect(service, &QLowEnergyService::characteristicChanged, this,
             [this](const QLowEnergyCharacteristic& characteristic, const QByteArray& value)
             {
+                qDebug() << "BLE characteristicChanged:"
+                         << characteristic.uuid().toString()
+                         << "len:" << value.size();
+
                 if (!ready)
                 {
                     return;

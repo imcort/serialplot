@@ -52,6 +52,7 @@ public:
     void disconnectFromDevice();
 
     bool isSequential() const override { return true; }
+    qint64 bytesAvailable() const override;
 
 public slots:
     void startScan();

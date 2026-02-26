@@ -24,6 +24,7 @@
 #include <QPermission>
 #include <QBluetoothPermission>
 #include <iostream>
+#include <cstdlib>
 
 #include "mainwindow.h"
 #include "tooltipfilter.h"
@@ -67,7 +68,7 @@ void messageHandler(QtMsgType type, const QMessageLogContext &context,
 
     if (type == QtFatalMsg)
     {
-        __builtin_trap();
+        std::abort();
     }
 }
 

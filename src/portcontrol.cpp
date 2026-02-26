@@ -230,6 +230,8 @@ PortControl::PortControl(QSerialPort* serialPort,
     serialGrid->addWidget(cbTransport, 2, 1);
 
     gbBle = new QGroupBox(tr("BLE (GATT)"), this);
+    gbBle->setMinimumWidth(420);
+    gbBle->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     auto bleLayout = new QVBoxLayout(gbBle);
     auto deviceRow = new QHBoxLayout();
     cbBleDevice = new QComboBox(gbBle);
@@ -245,6 +247,12 @@ PortControl::PortControl(QSerialPort* serialPort,
     leBleServiceUuid = new QLineEdit(DEFAULT_BLE_SERVICE_UUID, gbBle);
     leBleNotifyUuid = new QLineEdit(DEFAULT_BLE_NOTIFY_UUID, gbBle);
     leBleWriteUuid = new QLineEdit(DEFAULT_BLE_WRITE_UUID, gbBle);
+    leBleServiceUuid->setMinimumWidth(320);
+    leBleNotifyUuid->setMinimumWidth(320);
+    leBleWriteUuid->setMinimumWidth(320);
+    leBleServiceUuid->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    leBleNotifyUuid->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    leBleWriteUuid->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     leBleServiceUuid->setPlaceholderText(DEFAULT_BLE_SERVICE_UUID);
     leBleNotifyUuid->setPlaceholderText(DEFAULT_BLE_NOTIFY_UUID);
     leBleWriteUuid->setPlaceholderText(DEFAULT_BLE_WRITE_UUID);

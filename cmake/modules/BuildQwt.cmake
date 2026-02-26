@@ -19,6 +19,14 @@
 
 include(ExternalProject)
 
+if (MSVC)
+  set(QWT_MAKE_COMMAND nmake)
+elseif (WIN32)
+  set(QWT_MAKE_COMMAND mingw32-make)
+else ()
+  set(QWT_MAKE_COMMAND make)
+endif ()
+
 ExternalProject_Add(QWT
   PREFIX qwt
   URL https://sourceforge.net/projects/qwt/files/qwt/6.3.0/qwt-6.3.0.tar.bz2
@@ -40,9 +48,15 @@ ExternalProject_Add(QWT
                              <SOURCE_DIR>/qwtbuild.pri
   UPDATE_COMMAND ""
   CONFIGURE_COMMAND qmake6 <SOURCE_DIR>/qwt.pro
+  BUILD_COMMAND ${QWT_MAKE_COMMAND}
+  INSTALL_COMMAND ${QWT_MAKE_COMMAND} install
   )
 
 ExternalProject_Get_Property(QWT install_dir)
 set(QWT_ROOT ${install_dir})
-set(QWT_LIBRARY ${QWT_ROOT}/lib/libqwt.a)
+if (MSVC)
+  set(QWT_LIBRARY ${QWT_ROOT}/lib/qwt.lib)
+else ()
+  set(QWT_LIBRARY ${QWT_ROOT}/lib/libqwt.a)
+endif ()
 set(QWT_INCLUDE_DIR ${QWT_ROOT}/include)
