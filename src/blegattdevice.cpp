@@ -364,29 +364,12 @@ void BleGattDevice::initService(QLowEnergyService* srv)
                     return;
                 }
 
-                qDebug() << "BLE notify characteristic:" << notifyChar.uuid().toString()
-                         << "properties:" << Qt::hex << (int)props << Qt::dec
-                         << "cccd write:" << cccdValue.toHex();
-
                 connect(service, &QLowEnergyService::descriptorWritten, this,
                         [this, cccd, cccdValue](const QLowEnergyDescriptor& descriptor, const QByteArray& value)
                         {
                             if (descriptor.uuid() != cccd.uuid())
                             {
-                                qDebug() << "BLE descriptorWritten (other):"
-                                         << descriptor.uuid().toString()
-                                         << value.toHex();
                                 return;
-                            }
-
-                            qDebug() << "BLE CCCD descriptorWritten:"
-                                     << descriptor.uuid().toString()
-                                     << "value:" << value.toHex();
-                            if (value != cccdValue)
-                            {
-                                qWarning() << "BLE CCCD echo differs from requested value."
-                                           << "requested:" << cccdValue.toHex()
-                                           << "actual:" << value.toHex();
                             }
 
                             open(QIODevice::ReadWrite | QIODevice::Unbuffered);
@@ -400,10 +383,6 @@ void BleGattDevice::initService(QLowEnergyService* srv)
     connect(service, &QLowEnergyService::characteristicChanged, this,
             [this](const QLowEnergyCharacteristic& characteristic, const QByteArray& value)
             {
-                qDebug() << "BLE characteristicChanged:"
-                         << characteristic.uuid().toString()
-                         << "len:" << value.size();
-
                 if (!ready)
                 {
                     return;
