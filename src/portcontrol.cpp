@@ -22,6 +22,7 @@
 
 #include <QFormLayout>
 #include <QBluetoothAddress>
+#include <QCheckBox>
 #include <QFrame>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -37,8 +38,6 @@
 #include <QtDebug>
 
 #include "setting_defines.h"
-
-#define TBPORTLIST_MINWIDTH (200)
 
 static const char* DEFAULT_BLE_SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
 static const char* DEFAULT_BLE_NOTIFY_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
@@ -75,6 +74,7 @@ PortControl::PortControl(QSerialPort* serialPort,
     lbBleStatus(nullptr),
     pbBleScan(nullptr),
     leBleServiceUuid(nullptr),
+    cbBleFilterByServiceUuid(nullptr),
     leBleNotifyUuid(nullptr),
     leBleWriteUuid(nullptr),
     scanBleAction("Scan BLE", this)
@@ -143,21 +143,11 @@ PortControl::PortControl(QSerialPort* serialPort,
             this, &PortControl::scanBleDevices);
 
     // setup toolbar
-    portToolBar.addWidget(&tbPortList);
-    portToolBar.addAction(&loadPortListAction);
     portToolBar.addAction(&openAction);
 
     // setup port selection widgets
-    tbPortList.setMinimumWidth(TBPORTLIST_MINWIDTH);
-    tbPortList.setModel(&portList);
     ui->cbPortList->setModel(&portList);
-    QObject::connect(ui->cbPortList, &QComboBox::activated,
-                     this, &PortControl::onCbPortListActivated);
-    QObject::connect(&tbPortList, &QComboBox::activated,
-                     this, &PortControl::onTbPortListActivated);
     QObject::connect(ui->cbPortList, &QComboBox::textActivated,
-                     this, &PortControl::selectListedPort);
-    QObject::connect(&tbPortList, &QComboBox::textActivated,
                      this, &PortControl::selectListedPort);
 
     // setup buttons
@@ -265,9 +255,30 @@ PortControl::PortControl(QSerialPort* serialPort,
     leBleNotifyUuid->setPlaceholderText(DEFAULT_BLE_NOTIFY_UUID);
     leBleWriteUuid->setPlaceholderText(DEFAULT_BLE_WRITE_UUID);
     form->addRow(tr("Service UUID:"), leBleServiceUuid);
+    cbBleFilterByServiceUuid = new QCheckBox(tr("Only show devices advertising this service"), gbBle);
+    form->addRow(QString(), cbBleFilterByServiceUuid);
     form->addRow(tr("Notify UUID:"), leBleNotifyUuid);
     form->addRow(tr("Write UUID:"), leBleWriteUuid);
     bleLayout->addLayout(form);
+
+    auto refreshBleFilter = [this]()
+    {
+        refreshBleDeviceList();
+        if (!this->bleDevice->isScanning())
+        {
+            updateBleDeviceListStatus();
+        }
+    };
+    connect(cbBleFilterByServiceUuid, &QCheckBox::toggled,
+            this, refreshBleFilter);
+    connect(leBleServiceUuid, &QLineEdit::textChanged,
+            this, [this, refreshBleFilter](const QString&)
+            {
+                if (cbBleFilterByServiceUuid->isChecked())
+                {
+                    refreshBleFilter();
+                }
+            });
 
     lbBleStatus = new QLabel(tr("Idle"), gbBle);
     bleLayout->addWidget(lbBleStatus);
@@ -291,7 +302,6 @@ void PortControl::loadPortList()
     if (index >= 0)
     {
         ui->cbPortList->setCurrentIndex(index);
-        tbPortList.setCurrentIndex(index);
     }
 
     if (portList.rowCount() == 0)
@@ -401,7 +411,6 @@ void PortControl::togglePort()
             {
                 portList.appendRow(new PortListItem(portText));
                 ui->cbPortList->setCurrentIndex(portList.rowCount()-1);
-                tbPortList.setCurrentIndex(portList.rowCount()-1);
                 portName = portText;
             }
             else
@@ -495,16 +504,6 @@ void PortControl::openActionTriggered(bool checked)
 {
     Q_UNUSED(checked);
     togglePort();
-}
-
-void PortControl::onCbPortListActivated(int index)
-{
-    tbPortList.setCurrentIndex(index);
-}
-
-void PortControl::onTbPortListActivated(int index)
-{
-    ui->cbPortList->setCurrentIndex(index);
 }
 
 void PortControl::onPortError(QSerialPort::SerialPortError error)
@@ -623,7 +622,6 @@ void PortControl::selectPort(QString portName)
     }
 
     ui->cbPortList->setCurrentIndex(portIndex);
-    tbPortList.setCurrentIndex(portIndex);
 
     selectListedPort(portName);
 }
@@ -686,6 +684,7 @@ void PortControl::saveSettings(QSettings* settings)
     settings->setValue(SG_Port_FlowControl, currentFlowControlText());
     settings->setValue(SG_Port_TransportMode, (int)transportMode);
     settings->setValue(SG_Port_BleServiceUuid, leBleServiceUuid->text().trimmed());
+    settings->setValue(SG_Port_BleFilterByServiceUuid, cbBleFilterByServiceUuid->isChecked());
     settings->setValue(SG_Port_BleNotifyUuid, leBleNotifyUuid->text().trimmed());
     settings->setValue(SG_Port_BleWriteUuid, leBleWriteUuid->text().trimmed());
     settings->endGroup();
@@ -761,6 +760,7 @@ void PortControl::loadSettings(QSettings* settings)
     }
 
     leBleServiceUuid->setText(settings->value(SG_Port_BleServiceUuid, DEFAULT_BLE_SERVICE_UUID).toString());
+    cbBleFilterByServiceUuid->setChecked(settings->value(SG_Port_BleFilterByServiceUuid, false).toBool());
     leBleNotifyUuid->setText(settings->value(SG_Port_BleNotifyUuid, DEFAULT_BLE_NOTIFY_UUID).toString());
     leBleWriteUuid->setText(settings->value(SG_Port_BleWriteUuid, DEFAULT_BLE_WRITE_UUID).toString());
 
@@ -821,6 +821,7 @@ void PortControl::applyModeUi()
 
     cbBleDevice->setEnabled(!serial);
     leBleServiceUuid->setEnabled(!serial);
+    cbBleFilterByServiceUuid->setEnabled(!serial);
     leBleNotifyUuid->setEnabled(!serial);
     leBleWriteUuid->setEnabled(!serial);
     if (pbBleScan != nullptr)
@@ -841,12 +842,21 @@ bool PortControl::isSerialMode() const
 
 void PortControl::refreshBleDeviceList()
 {
-    scannedBleDevices = bleDevice->scannedDevices();
     QString selectedAddress = cbBleDevice->currentData().toString();
+    const bool filterByServiceUuid = cbBleFilterByServiceUuid->isChecked();
+    const QBluetoothUuid serviceUuid(leBleServiceUuid->text().trimmed());
 
+    scannedBleDevices.clear();
     cbBleDevice->clear();
-    for (const auto& info : scannedBleDevices)
+    for (const auto& info : bleDevice->scannedDevices())
     {
+        if (filterByServiceUuid &&
+            (serviceUuid.isNull() || !info.serviceUuids().contains(serviceUuid)))
+        {
+            continue;
+        }
+
+        scannedBleDevices.append(info);
         QString key = bleIdText(info);
         cbBleDevice->addItem(bleDeviceDisplayName(info), key);
     }
@@ -856,6 +866,36 @@ void PortControl::refreshBleDeviceList()
     {
         cbBleDevice->setCurrentIndex(idx);
     }
+}
+
+void PortControl::updateBleDeviceListStatus()
+{
+    if (lbBleStatus == nullptr)
+    {
+        return;
+    }
+
+    if (cbBleFilterByServiceUuid->isChecked())
+    {
+        const QBluetoothUuid serviceUuid(leBleServiceUuid->text().trimmed());
+        if (serviceUuid.isNull())
+        {
+            lbBleStatus->setText(tr("Enter a valid Service UUID to filter devices."));
+        }
+        else
+        {
+            lbBleStatus->setText(
+                scannedBleDevices.isEmpty()
+                    ? tr("No BLE device advertising this Service UUID found.")
+                    : tr("Found %1 BLE device(s) advertising this Service UUID.").arg(scannedBleDevices.size()));
+        }
+        return;
+    }
+
+    lbBleStatus->setText(
+        scannedBleDevices.isEmpty()
+            ? tr("No BLE device found.")
+            : tr("Found %1 BLE device(s).").arg(scannedBleDevices.size()));
 }
 
 void PortControl::connectBle()
@@ -969,11 +1009,5 @@ void PortControl::onBleScanFinished()
     {
         pbBleScan->setText(tr("Scan"));
     }
-    if (lbBleStatus != nullptr)
-    {
-        lbBleStatus->setText(
-            scannedBleDevices.isEmpty()
-                ? tr("No BLE device found.")
-                : tr("Found %1 BLE device(s).").arg(scannedBleDevices.size()));
-    }
+    updateBleDeviceListStatus();
 }

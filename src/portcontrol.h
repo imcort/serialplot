@@ -28,6 +28,7 @@
 #include <QToolBar>
 #include <QAction>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QLineEdit>
 #include <QSettings>
 #include <QTimer>
@@ -83,7 +84,6 @@ private:
     QToolBar portToolBar;
     QAction openAction;
     QAction loadPortListAction;
-    QComboBox tbPortList;
     PortList portList;
     enum class TransportMode
     {
@@ -99,6 +99,7 @@ private:
     QLabel* lbBleStatus;
     QPushButton* pbBleScan;
     QLineEdit* leBleServiceUuid;
+    QCheckBox* cbBleFilterByServiceUuid;
     QLineEdit* leBleNotifyUuid;
     QLineEdit* leBleWriteUuid;
     QAction scanBleAction;
@@ -112,6 +113,7 @@ private:
     void applyModeUi();
     bool isSerialMode() const;
     void refreshBleDeviceList();
+    void updateBleDeviceListStatus();
     void connectBle();
     void disconnectBle();
     QString bleDeviceDisplayName(const QBluetoothDeviceInfo& info) const;
@@ -133,8 +135,6 @@ private slots:
     void selectFlowControl(int flowControl); // flowControl must be one of QSerialPort::FlowControl
 
     void openActionTriggered(bool checked);
-    void onCbPortListActivated(int index);
-    void onTbPortListActivated(int index);
     void onPortError(QSerialPort::SerialPortError error);
     void updatePinLeds(void);
     void onTransportChanged(int index);

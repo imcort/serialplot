@@ -50,6 +50,7 @@ const char SG_Port_StopBits[] = "stopBits";
 const char SG_Port_FlowControl[] = "flowControl";
 const char SG_Port_TransportMode[] = "transportMode";
 const char SG_Port_BleServiceUuid[] = "bleServiceUuid";
+const char SG_Port_BleFilterByServiceUuid[] = "bleFilterByServiceUuid";
 const char SG_Port_BleNotifyUuid[] = "bleNotifyUuid";
 const char SG_Port_BleWriteUuid[] = "bleWriteUuid";
 
