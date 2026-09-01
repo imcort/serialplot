@@ -100,12 +100,18 @@ private:
     QPushButton* pbBleScan;
     QLineEdit* leBleServiceUuid;
     QCheckBox* cbBleFilterByServiceUuid;
+    QCheckBox* cbBleAutoReconnect;
     QLineEdit* leBleNotifyUuid;
     QLineEdit* leBleWriteUuid;
     QAction scanBleAction;
 
     /// Used to refresh pinout signal leds periodically
     QTimer pinUpdateTimer;
+    QTimer bleReconnectTimer;
+    QBluetoothDeviceInfo bleReconnectDevice;
+    bool bleConnectionDesired;
+    bool bleAutoReconnectArmed;
+    bool bleReconnectAttemptInProgress;
 
     /// Returns the currently selected (entered) "portName" in the UI
     QString selectedPortName();
@@ -114,6 +120,7 @@ private:
     bool isSerialMode() const;
     void refreshBleDeviceList();
     void updateBleDeviceListStatus();
+    void scheduleBleReconnect();
     void connectBle();
     void disconnectBle();
     QString bleDeviceDisplayName(const QBluetoothDeviceInfo& info) const;

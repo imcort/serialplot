@@ -42,6 +42,7 @@
 static const char* DEFAULT_BLE_SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
 static const char* DEFAULT_BLE_NOTIFY_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
 static const char* DEFAULT_BLE_WRITE_UUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
+static const int BLE_RECONNECT_INTERVAL_MS = 2000;
 
 static QString bleIdText(const QBluetoothDeviceInfo& info)
 {
@@ -75,9 +76,13 @@ PortControl::PortControl(QSerialPort* serialPort,
     pbBleScan(nullptr),
     leBleServiceUuid(nullptr),
     cbBleFilterByServiceUuid(nullptr),
+    cbBleAutoReconnect(nullptr),
     leBleNotifyUuid(nullptr),
     leBleWriteUuid(nullptr),
-    scanBleAction("Scan BLE", this)
+    scanBleAction("Scan BLE", this),
+    bleConnectionDesired(false),
+    bleAutoReconnectArmed(false),
+    bleReconnectAttemptInProgress(false)
 {
     ui->setupUi(this);
 
@@ -220,6 +225,32 @@ PortControl::PortControl(QSerialPort* serialPort,
     pinUpdateTimer.setInterval(1000); // ms
     connect(&pinUpdateTimer, &QTimer::timeout, this, &PortControl::updatePinLeds);
 
+    bleReconnectTimer.setSingleShot(true);
+    bleReconnectTimer.setInterval(BLE_RECONNECT_INTERVAL_MS);
+    connect(&bleReconnectTimer, &QTimer::timeout, this,
+            [this]()
+            {
+                if (isSerialMode() || !cbBleAutoReconnect->isChecked() ||
+                    !bleConnectionDesired || !bleAutoReconnectArmed ||
+                    !bleReconnectDevice.isValid())
+                {
+                    return;
+                }
+
+                if (lbBleStatus != nullptr)
+                {
+                    lbBleStatus->setText(tr("Reconnecting to BLE device..."));
+                }
+
+                bleReconnectAttemptInProgress = true;
+                const bool started = this->bleDevice->connectToDevice(bleReconnectDevice);
+                bleReconnectAttemptInProgress = false;
+                if (!started)
+                {
+                    scheduleBleReconnect();
+                }
+            });
+
     loadPortList();
     loadBaudRateList();
     ui->cbBaudRate->setCurrentIndex(ui->cbBaudRate->findText("9600"));
@@ -257,6 +288,8 @@ PortControl::PortControl(QSerialPort* serialPort,
     form->addRow(tr("Service UUID:"), leBleServiceUuid);
     cbBleFilterByServiceUuid = new QCheckBox(tr("Only show devices advertising this service"), gbBle);
     form->addRow(QString(), cbBleFilterByServiceUuid);
+    cbBleAutoReconnect = new QCheckBox(tr("Automatically reconnect after unexpected disconnect"), gbBle);
+    form->addRow(QString(), cbBleAutoReconnect);
     form->addRow(tr("Notify UUID:"), leBleNotifyUuid);
     form->addRow(tr("Write UUID:"), leBleWriteUuid);
     bleLayout->addLayout(form);
@@ -277,6 +310,23 @@ PortControl::PortControl(QSerialPort* serialPort,
                 if (cbBleFilterByServiceUuid->isChecked())
                 {
                     refreshBleFilter();
+                }
+            });
+    connect(cbBleAutoReconnect, &QCheckBox::toggled,
+            this, [this](bool enabled)
+            {
+                if (!enabled)
+                {
+                    bleReconnectTimer.stop();
+                    if (bleConnectionDesired && bleAutoReconnectArmed &&
+                        !this->bleDevice->isOpen() && lbBleStatus != nullptr)
+                    {
+                        lbBleStatus->setText(tr("BLE disconnected."));
+                    }
+                }
+                else if (!this->bleDevice->isOpen())
+                {
+                    scheduleBleReconnect();
                 }
             });
 
@@ -685,6 +735,7 @@ void PortControl::saveSettings(QSettings* settings)
     settings->setValue(SG_Port_TransportMode, (int)transportMode);
     settings->setValue(SG_Port_BleServiceUuid, leBleServiceUuid->text().trimmed());
     settings->setValue(SG_Port_BleFilterByServiceUuid, cbBleFilterByServiceUuid->isChecked());
+    settings->setValue(SG_Port_BleAutoReconnect, cbBleAutoReconnect->isChecked());
     settings->setValue(SG_Port_BleNotifyUuid, leBleNotifyUuid->text().trimmed());
     settings->setValue(SG_Port_BleWriteUuid, leBleWriteUuid->text().trimmed());
     settings->endGroup();
@@ -761,6 +812,7 @@ void PortControl::loadSettings(QSettings* settings)
 
     leBleServiceUuid->setText(settings->value(SG_Port_BleServiceUuid, DEFAULT_BLE_SERVICE_UUID).toString());
     cbBleFilterByServiceUuid->setChecked(settings->value(SG_Port_BleFilterByServiceUuid, false).toBool());
+    cbBleAutoReconnect->setChecked(settings->value(SG_Port_BleAutoReconnect, false).toBool());
     leBleNotifyUuid->setText(settings->value(SG_Port_BleNotifyUuid, DEFAULT_BLE_NOTIFY_UUID).toString());
     leBleWriteUuid->setText(settings->value(SG_Port_BleWriteUuid, DEFAULT_BLE_WRITE_UUID).toString());
 
@@ -822,6 +874,7 @@ void PortControl::applyModeUi()
     cbBleDevice->setEnabled(!serial);
     leBleServiceUuid->setEnabled(!serial);
     cbBleFilterByServiceUuid->setEnabled(!serial);
+    cbBleAutoReconnect->setEnabled(!serial);
     leBleNotifyUuid->setEnabled(!serial);
     leBleWriteUuid->setEnabled(!serial);
     if (pbBleScan != nullptr)
@@ -900,6 +953,8 @@ void PortControl::updateBleDeviceListStatus()
 
 void PortControl::connectBle()
 {
+    bleReconnectTimer.stop();
+
     if (cbBleDevice->currentIndex() < 0 || cbBleDevice->currentIndex() >= scannedBleDevices.size())
     {
         qWarning() << "Select a BLE device first.";
@@ -918,12 +973,43 @@ void PortControl::connectBle()
     bleDevice->setServiceUuid(serviceUuid);
     bleDevice->setNotifyUuid(notifyUuid);
     bleDevice->setWriteUuid(writeUuid);
-    bleDevice->connectToDevice(scannedBleDevices[cbBleDevice->currentIndex()]);
+    bleReconnectDevice = scannedBleDevices[cbBleDevice->currentIndex()];
+    bleConnectionDesired = true;
+    bleAutoReconnectArmed = false;
+    if (!bleDevice->connectToDevice(bleReconnectDevice))
+    {
+        bleConnectionDesired = false;
+    }
+    else if (lbBleStatus != nullptr)
+    {
+        lbBleStatus->setText(tr("Connecting to BLE device..."));
+    }
 }
 
 void PortControl::disconnectBle()
 {
+    bleConnectionDesired = false;
+    bleAutoReconnectArmed = false;
+    bleReconnectTimer.stop();
     bleDevice->disconnectFromDevice();
+}
+
+void PortControl::scheduleBleReconnect()
+{
+    if (isSerialMode() || !cbBleAutoReconnect->isChecked() ||
+        !bleConnectionDesired || !bleAutoReconnectArmed ||
+        !bleReconnectDevice.isValid() || bleReconnectAttemptInProgress ||
+        bleReconnectTimer.isActive())
+    {
+        return;
+    }
+
+    if (lbBleStatus != nullptr)
+    {
+        lbBleStatus->setText(tr("BLE disconnected. Reconnecting in %1 seconds...")
+                             .arg(BLE_RECONNECT_INTERVAL_MS / 1000));
+    }
+    bleReconnectTimer.start();
 }
 
 QString PortControl::bleDeviceDisplayName(const QBluetoothDeviceInfo& info) const
@@ -951,7 +1037,11 @@ void PortControl::onTransportChanged(int index)
         return;
     }
 
-    if (activeDevice()->isOpen())
+    if (transportMode == TransportMode::BLE && newMode != TransportMode::BLE)
+    {
+        disconnectBle();
+    }
+    else if (activeDevice()->isOpen())
     {
         togglePort();
     }
@@ -999,6 +1089,19 @@ void PortControl::scanBleDevices()
 void PortControl::onBleConnectedChanged(bool connected)
 {
     openAction.setChecked(connected);
+    if (connected)
+    {
+        bleReconnectTimer.stop();
+        bleAutoReconnectArmed = true;
+        if (lbBleStatus != nullptr)
+        {
+            lbBleStatus->setText(tr("BLE connected."));
+        }
+    }
+    else
+    {
+        scheduleBleReconnect();
+    }
     emit portToggled(connected);
 }
 
