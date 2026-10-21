@@ -43,6 +43,8 @@ static const char* DEFAULT_BLE_SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCC
 static const char* DEFAULT_BLE_NOTIFY_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
 static const char* DEFAULT_BLE_WRITE_UUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
 static const int BLE_RECONNECT_INTERVAL_MS = 2000;
+static const char* DEFAULT_TCP_HOST = "127.0.0.1";
+static const int DEFAULT_TCP_PORT = 9000;
 
 static QString bleIdText(const QBluetoothDeviceInfo& info)
 {
@@ -69,6 +71,7 @@ PortControl::PortControl(QSerialPort* serialPort,
     portToolBar("Port Toolbar"),
     openAction("Open", this),
     loadPortListAction("↺", this),
+    tcpSocket(),
     cbTransport(nullptr),
     cbBleDevice(nullptr),
     gbBle(nullptr),
@@ -79,6 +82,10 @@ PortControl::PortControl(QSerialPort* serialPort,
     cbBleAutoReconnect(nullptr),
     leBleNotifyUuid(nullptr),
     leBleWriteUuid(nullptr),
+    gbTcp(nullptr),
+    leTcpHost(nullptr),
+    sbTcpPort(nullptr),
+    lbTcpStatus(nullptr),
     scanBleAction("Scan BLE", this),
     bleConnectionDesired(false),
     bleAutoReconnectArmed(false),
@@ -120,6 +127,12 @@ PortControl::PortControl(QSerialPort* serialPort,
                 }
                 qWarning() << "BLE error:" << msg;
             });
+    connect(&tcpSocket, &QTcpSocket::connected,
+            this, &PortControl::onTcpConnected);
+    connect(&tcpSocket, &QTcpSocket::disconnected,
+            this, &PortControl::onTcpDisconnected);
+    connect(&tcpSocket, &QTcpSocket::errorOccurred,
+            this, &PortControl::onTcpError);
 
     // setup actions
     openAction.setCheckable(true);
@@ -137,7 +150,7 @@ PortControl::PortControl(QSerialPort* serialPort,
                          {
                              loadPortList();
                          }
-                         else
+                         else if (isBleMode())
                          {
                              scanBleDevices();
                          }
@@ -230,7 +243,7 @@ PortControl::PortControl(QSerialPort* serialPort,
     connect(&bleReconnectTimer, &QTimer::timeout, this,
             [this]()
             {
-                if (isSerialMode() || !cbBleAutoReconnect->isChecked() ||
+                if (!isBleMode() || !cbBleAutoReconnect->isChecked() ||
                     !bleConnectionDesired || !bleAutoReconnectArmed ||
                     !bleReconnectDevice.isValid())
                 {
@@ -255,12 +268,13 @@ PortControl::PortControl(QSerialPort* serialPort,
     loadBaudRateList();
     ui->cbBaudRate->setCurrentIndex(ui->cbBaudRate->findText("9600"));
 
-    // add transport and BLE widgets
+    // add transport, BLE, and TCP widgets
     auto serialGrid = ui->gridLayout;
     auto transportLabel = new QLabel(tr("Transport:"), this);
     cbTransport = new QComboBox(this);
     cbTransport->addItem(tr("Serial"));
     cbTransport->addItem(tr("BLE"));
+    cbTransport->addItem(tr("TCP"));
     connect(cbTransport, &QComboBox::currentIndexChanged,
             this, &PortControl::onTransportChanged);
     serialGrid->addWidget(transportLabel, 2, 0);
@@ -334,6 +348,24 @@ PortControl::PortControl(QSerialPort* serialPort,
     bleLayout->addWidget(lbBleStatus);
 
     static_cast<QVBoxLayout*>(ui->verticalLayout_3)->addWidget(gbBle);
+
+    gbTcp = new QGroupBox(tr("TCP"), this);
+    gbTcp->setObjectName("gbTcp");
+    auto tcpForm = new QFormLayout(gbTcp);
+    leTcpHost = new QLineEdit(DEFAULT_TCP_HOST, gbTcp);
+    leTcpHost->setObjectName("leTcpHost");
+    leTcpHost->setPlaceholderText(tr("IP address or host name"));
+    sbTcpPort = new QSpinBox(gbTcp);
+    sbTcpPort->setObjectName("sbTcpPort");
+    sbTcpPort->setRange(1, 65535);
+    sbTcpPort->setValue(DEFAULT_TCP_PORT);
+    sbTcpPort->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    tcpForm->addRow(tr("IP / Host:"), leTcpHost);
+    tcpForm->addRow(tr("Port:"), sbTcpPort);
+    lbTcpStatus = new QLabel(tr("Idle"), gbTcp);
+    lbTcpStatus->setObjectName("lbTcpStatus");
+    tcpForm->addRow(QString(), lbTcpStatus);
+    static_cast<QVBoxLayout*>(ui->verticalLayout_3)->addWidget(gbTcp);
 
     applyModeUi();
     emit deviceChanged(activeDevice());
@@ -492,6 +524,20 @@ void PortControl::togglePort()
         return;
     }
 
+    if (isTcpMode())
+    {
+        if (tcpSocket.state() != QAbstractSocket::UnconnectedState)
+        {
+            disconnectTcp();
+        }
+        else
+        {
+            connectTcp();
+        }
+        openAction.setChecked(tcpSocket.state() == QAbstractSocket::ConnectedState);
+        return;
+    }
+
     if (bleDevice->isOpen())
     {
         disconnectBle();
@@ -544,10 +590,22 @@ QToolBar* PortControl::toolBar()
     return &portToolBar;
 }
 
+QIODevice* PortControl::tcpDevice()
+{
+    return &tcpSocket;
+}
+
 QIODevice* PortControl::activeDevice()
 {
-    return isSerialMode() ? static_cast<QIODevice*>(serialPort)
-                          : static_cast<QIODevice*>(bleDevice);
+    if (isSerialMode())
+    {
+        return serialPort;
+    }
+    if (isBleMode())
+    {
+        return bleDevice;
+    }
+    return &tcpSocket;
 }
 
 void PortControl::openActionTriggered(bool checked)
@@ -738,12 +796,25 @@ void PortControl::saveSettings(QSettings* settings)
     settings->setValue(SG_Port_BleAutoReconnect, cbBleAutoReconnect->isChecked());
     settings->setValue(SG_Port_BleNotifyUuid, leBleNotifyUuid->text().trimmed());
     settings->setValue(SG_Port_BleWriteUuid, leBleWriteUuid->text().trimmed());
+    settings->setValue(SG_Port_TcpHost, leTcpHost->text().trimmed());
+    settings->setValue(SG_Port_TcpPort, sbTcpPort->value());
     settings->endGroup();
 }
 
 void PortControl::loadSettings(QSettings* settings)
 {
-    if (serialPort->isOpen() || bleDevice->isOpen()) togglePort();
+    if (isSerialMode() && serialPort->isOpen())
+    {
+        togglePort();
+    }
+    if (isBleMode() && bleDevice->isOpen())
+    {
+        togglePort();
+    }
+    if (isTcpMode() && tcpSocket.state() != QAbstractSocket::UnconnectedState)
+    {
+        togglePort();
+    }
 
     settings->beginGroup(SettingGroup_Port);
 
@@ -815,9 +886,16 @@ void PortControl::loadSettings(QSettings* settings)
     cbBleAutoReconnect->setChecked(settings->value(SG_Port_BleAutoReconnect, false).toBool());
     leBleNotifyUuid->setText(settings->value(SG_Port_BleNotifyUuid, DEFAULT_BLE_NOTIFY_UUID).toString());
     leBleWriteUuid->setText(settings->value(SG_Port_BleWriteUuid, DEFAULT_BLE_WRITE_UUID).toString());
+    leTcpHost->setText(settings->value(SG_Port_TcpHost, DEFAULT_TCP_HOST).toString());
+    int tcpPort = settings->value(SG_Port_TcpPort, DEFAULT_TCP_PORT).toInt();
+    if (tcpPort >= sbTcpPort->minimum() && tcpPort <= sbTcpPort->maximum())
+    {
+        sbTcpPort->setValue(tcpPort);
+    }
 
     int modeValue = settings->value(SG_Port_TransportMode, (int)TransportMode::Serial).toInt();
-    if (modeValue != (int)TransportMode::BLE)
+    if (modeValue < (int)TransportMode::Serial ||
+        modeValue > (int)TransportMode::TCP)
     {
         modeValue = (int)TransportMode::Serial;
     }
@@ -840,9 +918,11 @@ QBluetoothUuid PortControl::parseUuid(const QString& text)
 
 void PortControl::applyModeUi()
 {
-    bool serial = isSerialMode();
+    const bool serial = isSerialMode();
+    const bool ble = isBleMode();
+    const bool tcp = isTcpMode();
 
-    // Serial area (mutually exclusive with BLE area)
+    // Show only the controls for the selected transport.
     ui->label->setVisible(serial);
     ui->label_2->setVisible(serial);
     ui->cbPortList->setVisible(serial);
@@ -868,29 +948,46 @@ void PortControl::applyModeUi()
 
     if (gbBle != nullptr)
     {
-        gbBle->setVisible(!serial);
+        gbBle->setVisible(ble);
+    }
+    if (gbTcp != nullptr)
+    {
+        gbTcp->setVisible(tcp);
     }
 
-    cbBleDevice->setEnabled(!serial);
-    leBleServiceUuid->setEnabled(!serial);
-    cbBleFilterByServiceUuid->setEnabled(!serial);
-    cbBleAutoReconnect->setEnabled(!serial);
-    leBleNotifyUuid->setEnabled(!serial);
-    leBleWriteUuid->setEnabled(!serial);
+    cbBleDevice->setEnabled(ble);
+    leBleServiceUuid->setEnabled(ble);
+    cbBleFilterByServiceUuid->setEnabled(ble);
+    cbBleAutoReconnect->setEnabled(ble);
+    leBleNotifyUuid->setEnabled(ble);
+    leBleWriteUuid->setEnabled(ble);
     if (pbBleScan != nullptr)
     {
-        pbBleScan->setEnabled(!serial);
+        pbBleScan->setEnabled(ble);
     }
-    scanBleAction.setEnabled(!serial);
+    scanBleAction.setEnabled(ble);
 
+    loadPortListAction.setEnabled(serial || ble);
     loadPortListAction.setToolTip(serial ? "Reload port list" : "Scan BLE devices");
     openAction.setText(serial ? tr("Open") : tr("Connect"));
-    openAction.setChecked(activeDevice()->isOpen());
+    openAction.setChecked(serial ? serialPort->isOpen()
+                                 : (ble ? bleDevice->isOpen()
+                                        : tcpSocket.state() == QAbstractSocket::ConnectedState));
 }
 
 bool PortControl::isSerialMode() const
 {
     return transportMode == TransportMode::Serial;
+}
+
+bool PortControl::isBleMode() const
+{
+    return transportMode == TransportMode::BLE;
+}
+
+bool PortControl::isTcpMode() const
+{
+    return transportMode == TransportMode::TCP;
 }
 
 void PortControl::refreshBleDeviceList()
@@ -994,9 +1091,42 @@ void PortControl::disconnectBle()
     bleDevice->disconnectFromDevice();
 }
 
+void PortControl::connectTcp()
+{
+    const QString host = leTcpHost->text().trimmed();
+    const int port = sbTcpPort->value();
+    if (host.isEmpty())
+    {
+        qWarning() << "Enter a TCP host or IP address first.";
+        lbTcpStatus->setText(tr("Enter an IP address or host name."));
+        return;
+    }
+
+    lbTcpStatus->setText(tr("Connecting to %1:%2...").arg(host).arg(port));
+    tcpSocket.connectToHost(host, static_cast<quint16>(port));
+}
+
+void PortControl::disconnectTcp()
+{
+    if (tcpSocket.state() == QAbstractSocket::UnconnectedState)
+    {
+        return;
+    }
+
+    lbTcpStatus->setText(tr("Disconnecting..."));
+    if (tcpSocket.state() == QAbstractSocket::ConnectedState)
+    {
+        tcpSocket.disconnectFromHost();
+    }
+    else
+    {
+        tcpSocket.abort();
+    }
+}
+
 void PortControl::scheduleBleReconnect()
 {
-    if (isSerialMode() || !cbBleAutoReconnect->isChecked() ||
+    if (!isBleMode() || !cbBleAutoReconnect->isChecked() ||
         !bleConnectionDesired || !bleAutoReconnectArmed ||
         !bleReconnectDevice.isValid() || bleReconnectAttemptInProgress ||
         bleReconnectTimer.isActive())
@@ -1029,7 +1159,15 @@ QString PortControl::bleDeviceDisplayName(const QBluetoothDeviceInfo& info) cons
 
 void PortControl::onTransportChanged(int index)
 {
-    TransportMode newMode = index == (int)TransportMode::BLE ? TransportMode::BLE : TransportMode::Serial;
+    TransportMode newMode = TransportMode::Serial;
+    if (index == (int)TransportMode::BLE)
+    {
+        newMode = TransportMode::BLE;
+    }
+    else if (index == (int)TransportMode::TCP)
+    {
+        newMode = TransportMode::TCP;
+    }
     if (newMode == transportMode)
     {
         applyModeUi();
@@ -1040,6 +1178,10 @@ void PortControl::onTransportChanged(int index)
     if (transportMode == TransportMode::BLE && newMode != TransportMode::BLE)
     {
         disconnectBle();
+    }
+    else if (transportMode == TransportMode::TCP && newMode != TransportMode::TCP)
+    {
+        disconnectTcp();
     }
     else if (activeDevice()->isOpen())
     {
@@ -1054,7 +1196,7 @@ void PortControl::onTransportChanged(int index)
 
 void PortControl::scanBleDevices()
 {
-    if (isSerialMode())
+    if (!isBleMode())
     {
         return;
     }
@@ -1113,4 +1255,40 @@ void PortControl::onBleScanFinished()
         pbBleScan->setText(tr("Scan"));
     }
     updateBleDeviceListStatus();
+}
+
+void PortControl::onTcpConnected()
+{
+    if (!isTcpMode())
+    {
+        tcpSocket.disconnectFromHost();
+        return;
+    }
+
+    openAction.setChecked(true);
+    lbTcpStatus->setText(tr("TCP connected to %1:%2.")
+                         .arg(leTcpHost->text().trimmed())
+                         .arg(sbTcpPort->value()));
+    emit portToggled(true);
+}
+
+void PortControl::onTcpDisconnected()
+{
+    openAction.setChecked(false);
+    if (isTcpMode())
+    {
+        lbTcpStatus->setText(tr("TCP disconnected."));
+        emit portToggled(false);
+    }
+}
+
+void PortControl::onTcpError(QAbstractSocket::SocketError error)
+{
+    Q_UNUSED(error);
+    openAction.setChecked(false);
+    if (isTcpMode())
+    {
+        lbTcpStatus->setText(tr("TCP error: %1").arg(tcpSocket.errorString()));
+        qWarning() << "TCP error:" << tcpSocket.errorString();
+    }
 }

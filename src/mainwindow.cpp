@@ -178,6 +178,8 @@ MainWindow::MainWindow(QWidget *parent) :
                                              &recordPanel, &RecordPanel::onPortClose);
                          QObject::disconnect(&bleDevice, &QIODevice::aboutToClose,
                                              &recordPanel, &RecordPanel::onPortClose);
+                         QObject::disconnect(portControl.tcpDevice(), &QIODevice::aboutToClose,
+                                             &recordPanel, &RecordPanel::onPortClose);
                          QObject::connect(device, &QIODevice::aboutToClose,
                                           &recordPanel, &RecordPanel::onPortClose);
                      });
@@ -310,6 +312,10 @@ MainWindow::~MainWindow()
     {
         serialPort.close();
     }
+    if (portControl.tcpDevice()->isOpen())
+    {
+        portControl.tcpDevice()->close();
+    }
     bleDevice.disconnectFromDevice();
 
     delete plotMan;
@@ -431,7 +437,7 @@ void MainWindow::enableDemo(bool enabled)
 {
     if (enabled)
     {
-        if (!serialPort.isOpen())
+        if (!portControl.activeDevice()->isOpen())
         {
             dataFormatPanel.enableDemo(true);
         }

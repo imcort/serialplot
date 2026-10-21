@@ -54,6 +54,8 @@ const char SG_Port_BleFilterByServiceUuid[] = "bleFilterByServiceUuid";
 const char SG_Port_BleAutoReconnect[] = "bleAutoReconnect";
 const char SG_Port_BleNotifyUuid[] = "bleNotifyUuid";
 const char SG_Port_BleWriteUuid[] = "bleWriteUuid";
+const char SG_Port_TcpHost[] = "tcpHost";
+const char SG_Port_TcpPort[] = "tcpPort";
 
 // data format panel keys
 const char SG_DataFormat_Format[] = "format";

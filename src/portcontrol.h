@@ -23,6 +23,7 @@
 #include <QWidget>
 #include <QButtonGroup>
 #include <QSerialPort>
+#include <QTcpSocket>
 #include <QIODevice>
 #include <QStringList>
 #include <QToolBar>
@@ -36,6 +37,7 @@
 #include <QGroupBox>
 #include <QLabel>
 #include <QPushButton>
+#include <QSpinBox>
 
 #include <QBluetoothDeviceInfo>
 #include <QBluetoothUuid>
@@ -59,6 +61,7 @@ public:
 
     QSerialPort* serialPort;
     BleGattDevice* bleDevice;
+    QIODevice* tcpDevice();
     QToolBar* toolBar();
     QIODevice* activeDevice();
 
@@ -70,7 +73,7 @@ public:
 
     /// Stores port settings into a `QSettings`
     void saveSettings(QSettings* settings);
-    /// Loads port settings from a `QSettings`. If open serial port is closed.
+    /// Loads port settings from a `QSettings`. Any active connection is closed.
     void loadSettings(QSettings* settings);
 
 private:
@@ -88,10 +91,13 @@ private:
     enum class TransportMode
     {
         Serial = 0,
-        BLE = 1
+        BLE = 1,
+        TCP = 2
     };
     TransportMode transportMode;
     QList<QBluetoothDeviceInfo> scannedBleDevices;
+
+    QTcpSocket tcpSocket;
 
     QComboBox* cbTransport;
     QComboBox* cbBleDevice;
@@ -103,6 +109,10 @@ private:
     QCheckBox* cbBleAutoReconnect;
     QLineEdit* leBleNotifyUuid;
     QLineEdit* leBleWriteUuid;
+    QGroupBox* gbTcp;
+    QLineEdit* leTcpHost;
+    QSpinBox* sbTcpPort;
+    QLabel* lbTcpStatus;
     QAction scanBleAction;
 
     /// Used to refresh pinout signal leds periodically
@@ -118,11 +128,15 @@ private:
     QBluetoothUuid parseUuid(const QString& text);
     void applyModeUi();
     bool isSerialMode() const;
+    bool isBleMode() const;
+    bool isTcpMode() const;
     void refreshBleDeviceList();
     void updateBleDeviceListStatus();
     void scheduleBleReconnect();
     void connectBle();
     void disconnectBle();
+    void connectTcp();
+    void disconnectTcp();
     QString bleDeviceDisplayName(const QBluetoothDeviceInfo& info) const;
     /// Returns currently selected parity as text to be saved in settings
     QString currentParityText();
@@ -148,6 +162,9 @@ private slots:
     void scanBleDevices();
     void onBleConnectedChanged(bool connected);
     void onBleScanFinished();
+    void onTcpConnected();
+    void onTcpDisconnected();
+    void onTcpError(QAbstractSocket::SocketError error);
 
 signals:
     void portToggled(bool open);
