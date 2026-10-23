@@ -2107,6 +2107,10 @@ namespace Catch{
         #define CATCH_TRAP() \
                 __asm__("li r0, 20\nsc\nnop\nli r0, 37\nli r4, 2\nsc\nnop\n" \
                 : : : "memory","r0","r3","r4" )
+    #elif defined(__aarch64__) || defined(__arm64__)
+        // NOTE (local patch): `int $3` is x86 only and does not assemble on
+        // Apple Silicon.
+        #define CATCH_TRAP() __builtin_trap()
     #else
         #define CATCH_TRAP() __asm__("int $3\n" : : )
     #endif
@@ -7168,7 +7172,10 @@ namespace Catch {
 namespace Catch {
 
     struct RandomNumberGenerator {
-        typedef std::ptrdiff_t result_type;
+        // NOTE (local patch): upstream uses std::ptrdiff_t here, which modern
+        // libc++ rejects as a URBG (unsigned integral type required) when
+        // std::shuffle is instantiated. std::size_t is equivalent here.
+        typedef std::size_t result_type;
 
         result_type operator()( result_type n ) const { return std::rand() % n; }
 

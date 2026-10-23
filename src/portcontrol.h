@@ -98,6 +98,9 @@ private:
     QList<QBluetoothDeviceInfo> scannedBleDevices;
 
     QTcpSocket tcpSocket;
+    /// Tracks whether `portToggled(true)` was emitted for the TCP socket,
+    /// so that the matching `false` is emitted exactly once
+    bool tcpReportedOpen;
 
     QComboBox* cbTransport;
     QComboBox* cbBleDevice;

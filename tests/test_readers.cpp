@@ -29,6 +29,9 @@
 #include "framedreader.h"
 #include "demoreader.h"
 #include "numberformatbox.h"
+#include "endiannessbox.h"
+#include "binarystreamreadersettings.h"
+#include "framedreadersettings.h"
 
 #include "test_helpers.h"
 
@@ -308,4 +311,199 @@ int main(int argc, char* argv[])
     int result = Catch::Session().run( argc, argv );
 
     return result;
+}
+
+// ---------------------------------------------------------------------------
+// 24 bit formats: exercise the sign extension and both byte orders at the
+// boundaries of the 24 bit range.
+// ---------------------------------------------------------------------------
+
+struct Sample24Case
+{
+    const char* name;
+    NumberFormat format;
+    Endianness endianness;
+    uint8_t bytes[3];
+    double expected;
+};
+
+static const Sample24Case sample24Cases[] = {
+    // unsigned
+    {"uint24 LE zero",        NumberFormat_uint24, LittleEndian, {0x00, 0x00, 0x00}, 0.0},
+    {"uint24 LE max",         NumberFormat_uint24, LittleEndian, {0xFF, 0xFF, 0xFF}, 16777215.0},
+    {"uint24 LE sign bit",    NumberFormat_uint24, LittleEndian, {0x00, 0x00, 0x80}, 8388608.0},
+    {"uint24 BE one",         NumberFormat_uint24, BigEndian,    {0x00, 0x00, 0x01}, 1.0},
+    {"uint24 BE max",         NumberFormat_uint24, BigEndian,    {0xFF, 0xFF, 0xFF}, 16777215.0},
+    {"uint24 BE 0x123456",    NumberFormat_uint24, BigEndian,    {0x12, 0x34, 0x56}, 1193046.0},
+    {"uint24 LE 0x123456",    NumberFormat_uint24, LittleEndian, {0x56, 0x34, 0x12}, 1193046.0},
+    // signed: the 0x80/0x7F boundary is where sign extension can go wrong
+    {"int24 LE zero",         NumberFormat_int24,  LittleEndian, {0x00, 0x00, 0x00}, 0.0},
+    {"int24 LE -1",           NumberFormat_int24,  LittleEndian, {0xFF, 0xFF, 0xFF}, -1.0},
+    {"int24 LE max",          NumberFormat_int24,  LittleEndian, {0xFF, 0xFF, 0x7F}, 8388607.0},
+    {"int24 LE min",          NumberFormat_int24,  LittleEndian, {0x00, 0x00, 0x80}, -8388608.0},
+    {"int24 LE -2",           NumberFormat_int24,  LittleEndian, {0xFE, 0xFF, 0xFF}, -2.0},
+    {"int24 LE 0x000080",     NumberFormat_int24,  LittleEndian, {0x80, 0x00, 0x00}, 128.0},
+    {"int24 BE -1",           NumberFormat_int24,  BigEndian,    {0xFF, 0xFF, 0xFF}, -1.0},
+    {"int24 BE max",          NumberFormat_int24,  BigEndian,    {0x7F, 0xFF, 0xFF}, 8388607.0},
+    {"int24 BE min",          NumberFormat_int24,  BigEndian,    {0x80, 0x00, 0x00}, -8388608.0},
+    {"int24 BE 0x000080",     NumberFormat_int24,  BigEndian,    {0x00, 0x00, 0x80}, 128.0},
+};
+
+TEST_CASE("BinaryStreamReader reads 24 bit samples", "[reader, int24]")
+{
+    for (const auto& c : sample24Cases)
+    {
+        INFO(c.name);
+
+        QBuffer bufferDev;
+        BinaryStreamReader reader(&bufferDev);
+        reader.enable(true);
+
+        CapturingSink sink;
+        reader.connectSink(&sink);
+
+        auto* settings = dynamic_cast<BinaryStreamReaderSettings*>(reader.settingsWidget());
+        REQUIRE(settings != nullptr);
+        auto* nfBox = settings->findChild<NumberFormatBox*>("nfBox");
+        REQUIRE(nfBox != nullptr);
+        nfBox->setSelection(c.format);
+        auto* endiBox = settings->findChild<EndiannessBox*>("endiBox");
+        REQUIRE(endiBox != nullptr);
+        endiBox->setSelection(c.endianness);
+
+        bufferDev.open(QIODevice::ReadWrite);
+        bufferDev.write((const char*) c.bytes, 3);
+        bufferDev.seek(0);
+
+        QSignalSpy spy(&bufferDev, SIGNAL(readyRead()));
+        REQUIRE(spy.wait(READYREAD_TIMEOUT));
+
+        REQUIRE(sink.totalFed == 1);
+        REQUIRE(sink.hasSample);
+        REQUIRE(sink.lastSample == c.expected);
+    }
+}
+
+TEST_CASE("FramedReader reads 24 bit samples", "[reader, int24]")
+{
+    for (const auto& c : sample24Cases)
+    {
+        INFO(c.name);
+
+        QBuffer bufferDev;
+        FramedReader reader(&bufferDev);
+        reader.enable(true);
+
+        CapturingSink sink;
+        reader.connectSink(&sink);
+
+        auto* settings = dynamic_cast<FramedReaderSettings*>(reader.settingsWidget());
+        REQUIRE(settings != nullptr);
+        auto* nfBox = settings->findChild<NumberFormatBox*>("nfBox");
+        REQUIRE(nfBox != nullptr);
+        nfBox->setSelection(c.format);
+        auto* endiBox = settings->findChild<EndiannessBox*>("endiBox");
+        REQUIRE(endiBox != nullptr);
+        endiBox->setSelection(c.endianness);
+
+        // default frame: 2 byte sync word "AA BB", 1 byte size, 3 byte payload,
+        // checksum disabled by default
+        const uint8_t frame[6] = {0xAA, 0xBB, 3, c.bytes[0], c.bytes[1], c.bytes[2]};
+
+        bufferDev.open(QIODevice::ReadWrite);
+        bufferDev.write((const char*) frame, 6);
+        bufferDev.seek(0);
+
+        QSignalSpy spy(&bufferDev, SIGNAL(readyRead()));
+        REQUIRE(spy.wait(READYREAD_TIMEOUT));
+
+        REQUIRE(sink.totalFed == 1);
+        REQUIRE(sink.hasSample);
+        REQUIRE(sink.lastSample == c.expected);
+    }
+}
+
+/// Captures the last sample of every channel of the last fed pack
+class RowCapturingSink : public TestSink
+{
+public:
+    QVector<double> lastRow;
+
+    void feedIn(const SamplePack& data) override
+    {
+        lastRow.clear();
+        if (data.numSamples() > 0)
+        {
+            for (unsigned ci = 0; ci < data.numChannels(); ci++)
+            {
+                lastRow << data.data(ci)[data.numSamples()-1];
+            }
+        }
+
+        TestSink::feedIn(data);
+    }
+};
+
+TEST_CASE("24 bit samples of several channels are not interleaved wrongly", "[reader, int24]")
+{
+    // channel 0: 1, channel 1: -1 -- with 3 byte samples a wrong stride shows up here
+    const uint8_t payload[] = {0x01, 0x00, 0x00, 0xFF, 0xFF, 0xFF};
+
+    SECTION("BinaryStreamReader")
+    {
+        QBuffer bufferDev;
+        BinaryStreamReader reader(&bufferDev);
+        reader.enable(true);
+
+        RowCapturingSink sink;
+        reader.connectSink(&sink);
+
+        auto* settings = dynamic_cast<BinaryStreamReaderSettings*>(reader.settingsWidget());
+        REQUIRE(settings != nullptr);
+        settings->findChild<NumberFormatBox*>("nfBox")->setSelection(NumberFormat_int24);
+        settings->findChild<QSpinBox*>("spNumOfChannels")->setValue(2);
+
+        bufferDev.open(QIODevice::ReadWrite);
+        bufferDev.write((const char*) payload, 6);
+        bufferDev.seek(0);
+
+        QSignalSpy spy(&bufferDev, SIGNAL(readyRead()));
+        REQUIRE(spy.wait(READYREAD_TIMEOUT));
+
+        REQUIRE(sink.totalFed == 1);
+        REQUIRE(sink.lastRow.size() == 2);
+        REQUIRE(sink.lastRow[0] == 1.0);
+        REQUIRE(sink.lastRow[1] == -1.0);
+    }
+
+    SECTION("FramedReader")
+    {
+        QBuffer bufferDev;
+        FramedReader reader(&bufferDev);
+        reader.enable(true);
+
+        RowCapturingSink sink;
+        reader.connectSink(&sink);
+
+        auto* settings = dynamic_cast<FramedReaderSettings*>(reader.settingsWidget());
+        REQUIRE(settings != nullptr);
+        settings->findChild<NumberFormatBox*>("nfBox")->setSelection(NumberFormat_int24);
+        settings->findChild<QSpinBox*>("spNumOfChannels")->setValue(2);
+
+        // sync word + payload size (6) + payload
+        const uint8_t frame[] = {0xAA, 0xBB, 6,
+                                 0x01, 0x00, 0x00, 0xFF, 0xFF, 0xFF};
+
+        bufferDev.open(QIODevice::ReadWrite);
+        bufferDev.write((const char*) frame, sizeof(frame));
+        bufferDev.seek(0);
+
+        QSignalSpy spy(&bufferDev, SIGNAL(readyRead()));
+        REQUIRE(spy.wait(READYREAD_TIMEOUT));
+
+        REQUIRE(sink.totalFed == 1);
+        REQUIRE(sink.lastRow.size() == 2);
+        REQUIRE(sink.lastRow[0] == 1.0);
+        REQUIRE(sink.lastRow[1] == -1.0);
+    }
 }

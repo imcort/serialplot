@@ -27,6 +27,8 @@
 #include <QList>
 #include <QSettings>
 #include <QMenu>
+#include <QTimer>
+#include <QElapsedTimer>
 
 #include <qwt_plot_curve.h>
 #include "plot.h"
@@ -59,8 +61,17 @@ public:
 public slots:
     /// Enable/Disable multiple plot display
     void setMulti(bool enabled);
-    /// Update all plot widgets
+    /// Update all plot widgets immediately
     void replot();
+    /**
+     * Request a plot update, coalesced to the display refresh rate.
+     *
+     * This is what gets connected to `Stream::dataAdded`. Data can arrive
+     * far faster than the display can be redrawn and, since both the
+     * reading and the redrawing happen in the GUI thread, an unthrottled
+     * replot makes the reader fall behind and lose samples.
+     */
+    void requestReplot();
     /// Enable display of a "DEMO" label on each plot
     void showDemoIndicator(bool show = true);
     /// Set the Y axis
@@ -100,8 +111,14 @@ private:
     bool inScaleSync; ///< scaleSync is in progress
     int lineThickness;
 
+    /// Coalesces plot updates, see `requestReplot()`
+    QTimer replotTimer;
+    QElapsedTimer lastReplot;
+
     /// Common constructor
     void construct(QWidget* plotArea, PlotMenu* menu);
+    /// Redraws all plot widgets and stamps the throttling clock
+    void replotNow();
     /// Setups the layout for multi or single plot
     void setupLayout(bool multiPlot);
     /// Inserts a new plot widget to the current layout.
@@ -123,6 +140,8 @@ private slots:
     void setSymbols(Plot::ShowSymbols shown);
 
     void onNumChannelsChanged(unsigned value);
+    /// Re-points curve series to the current X buffers of the stream
+    void onXBufferChanged();
     void onChannelInfoChanged(const QModelIndex & topLeft,
                               const QModelIndex & bottomRight,
                               const QVector<int> & roles = QVector<int> ());

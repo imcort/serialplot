@@ -132,6 +132,8 @@ void Stream::setNumChannels(unsigned nc, bool x)
     // change the xdata
     if (x != _hasx)
     {
+        XFrameBuffer* oldXData = nullptr;
+
         if (x)
         {
             // TODO: implement XRingBuffer (binary search)
@@ -139,14 +141,21 @@ void Stream::setNumChannels(unsigned nc, bool x)
         }
         else
         {
+            oldXData = xData;
             xData = makeXBuffer();
+            for (auto c : channels)
+            {
+                c->setX(xData);
+            }
         }
 
-        for (auto c : channels)
-        {
-            c->setX(xData);
-        }
         _hasx = x;
+
+        if (oldXData != nullptr)
+        {
+            emit xBufferChanged();
+            delete oldXData;
+        }
     }
 
     if (nc != oldNum)
@@ -278,11 +287,15 @@ void Stream::setXAxis(bool asIndex, double min, double max)
     // TODO: assert (UI options for x axis should be disabled)
     if (!hasX())
     {
+        XFrameBuffer* oldXData = xData;
         xData = makeXBuffer();
         for (auto c : channels)
         {
             c->setX(xData);
         }
+        // let curve series drop their pointer to the old buffer before it dies
+        emit xBufferChanged();
+        delete oldXData;
     }
 }
 

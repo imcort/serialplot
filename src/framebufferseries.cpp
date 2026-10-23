@@ -20,13 +20,16 @@
 #include <math.h>
 #include "framebufferseries.h"
 
+// Note: `int_index_start` and `int_index_end` are both *inclusive* sample
+// indexes into the underlying buffers. `size()` returns the number of samples
+// in that range, `sample(i)` maps `i` to the buffer index `i + int_index_start`.
 FrameBufferSeries::FrameBufferSeries(const XFrameBuffer* x, const FrameBuffer* y)
 {
     _x = x;
     _y = y;
 
     int_index_start = 0;
-    int_index_end = _y->size();
+    int_index_end = _y->size() > 0 ? int(_y->size()) - 1 : -1;
 }
 
 void FrameBufferSeries::setX(const XFrameBuffer* x)
@@ -36,7 +39,9 @@ void FrameBufferSeries::setX(const XFrameBuffer* x)
 
 size_t FrameBufferSeries::size() const
 {
-    return int_index_end - int_index_start + 1;
+    if (int_index_end < int_index_start) return 0;
+
+    return size_t(int_index_end - int_index_start + 1);
 }
 
 QPointF FrameBufferSeries::sample(size_t i) const
@@ -74,9 +79,9 @@ void FrameBufferSeries::setRectOfInterest(const QRectF& rect)
 
     if (int_index_end == XFrameBuffer::OUT_OF_RANGE)
     {
-        int_index_end = _x->size()-1;
+        int_index_end = int(_x->size()) - 1;
     }
-    else if (int_index_end < (int)_x->size()-1)
+    else if (int_index_end < int(_x->size())-1)
     {
         int_index_end += 1;
     }

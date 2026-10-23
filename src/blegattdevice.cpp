@@ -35,6 +35,7 @@ BleGattDevice::BleGattDevice(QObject* parent)
       _serviceUuid(QBluetoothUuid("{6E400001-B5A3-F393-E0A9-E50E24DCCA9E}")),
       _notifyUuid(QBluetoothUuid("{6E400003-B5A3-F393-E0A9-E50E24DCCA9E}")),
       _writeUuid(QBluetoothUuid("{6E400002-B5A3-F393-E0A9-E50E24DCCA9E}")),
+      readPos(0),
       ready(false),
       scanning(false)
 {
@@ -245,24 +246,38 @@ void BleGattDevice::disconnectFromDevice()
 
 qint64 BleGattDevice::bytesAvailable() const
 {
-    return QIODevice::bytesAvailable() + readBuffer.size();
+    return QIODevice::bytesAvailable() + (readBuffer.size() - readPos);
 }
 
 bool BleGattDevice::canReadLine() const
 {
-    return readBuffer.contains('\n') || QIODevice::canReadLine();
+    return readBuffer.indexOf('\n', readPos) >= 0 || QIODevice::canReadLine();
 }
 
 qint64 BleGattDevice::readData(char* data, qint64 maxSize)
 {
-    if (maxSize <= 0 || readBuffer.isEmpty())
+    if (maxSize <= 0 || readPos >= readBuffer.size())
     {
         return 0;
     }
 
-    qint64 bytesToRead = qMin(maxSize, (qint64)readBuffer.size());
-    memcpy(data, readBuffer.constData(), (size_t)bytesToRead);
-    readBuffer.remove(0, (int)bytesToRead);
+    qint64 bytesToRead = qMin(maxSize, (qint64)(readBuffer.size() - readPos));
+    memcpy(data, readBuffer.constData() + readPos, (size_t)bytesToRead);
+    readPos += (int)bytesToRead;
+
+    // Only drop the consumed part once it is worth the memmove, `remove(0, n)`
+    // on every read would be quadratic for a high notification rate.
+    if (readPos >= readBuffer.size())
+    {
+        readBuffer.clear();
+        readPos = 0;
+    }
+    else if (readPos >= 4096 && readPos * 2 >= readBuffer.size())
+    {
+        readBuffer.remove(0, readPos);
+        readPos = 0;
+    }
+
     return bytesToRead;
 }
 
@@ -273,13 +288,30 @@ qint64 BleGattDevice::writeData(const char* data, qint64 maxSize)
         return -1;
     }
 
-    QByteArray payload(data, (int)maxSize);
+    // A single GATT write cannot exceed (MTU - 3) bytes, longer payloads have
+    // to be split into several writes.
+    int chunkSize = 20; // default MTU 23
+    if (controller != nullptr && controller->mtu() > 3)
+    {
+        chunkSize = controller->mtu() - 3;
+    }
+
     QLowEnergyService::WriteMode mode = QLowEnergyService::WriteWithoutResponse;
     if (writeChar.properties().testFlag(QLowEnergyCharacteristic::Write))
     {
         mode = QLowEnergyService::WriteWithResponse;
     }
-    service->writeCharacteristic(writeChar, payload, mode);
+
+    const char* pos = data;
+    qint64 remaining = maxSize;
+    while (remaining > 0)
+    {
+        const int n = (int) qMin<qint64>(remaining, chunkSize);
+        service->writeCharacteristic(writeChar, QByteArray(pos, n), mode);
+        pos += n;
+        remaining -= n;
+    }
+
     return maxSize;
 }
 
@@ -291,6 +323,7 @@ void BleGattDevice::clearConnection()
         close();
     }
     readBuffer.clear();
+    readPos = 0;
 
     if (service)
     {

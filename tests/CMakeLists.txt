@@ -18,12 +18,11 @@
 #
 
 # Find the QtWidgets library
-find_package(Qt5Widgets)
-find_package(Qt5Test)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Test)
 
 include_directories("../src")
 
-add_executable(Test EXCLUDE_FROM_ALL
+qt_add_executable(Test EXCLUDE_FROM_ALL
   test.cpp
   test_stream.cpp
   ../src/samplepack.cpp
@@ -37,10 +36,11 @@ add_executable(Test EXCLUDE_FROM_ALL
   ../src/streamchannel.cpp
   ../src/channelinfomodel.cpp
   )
+target_link_libraries(Test PRIVATE Qt6::Widgets Qt6::Test)
 add_test(NAME test1 COMMAND Test)
-qt5_use_modules(Test Widgets)
 
-qt5_wrap_ui(UI_FILES_T
+# AUTOUIC generates the `ui_*.h` headers from these
+set(UI_FILES_T
   ../src/binarystreamreadersettings.ui
   ../src/asciireadersettings.ui
   ../src/framedreadersettings.ui
@@ -50,7 +50,7 @@ qt5_wrap_ui(UI_FILES_T
   )
 
 # test for readers
-add_executable(TestReaders EXCLUDE_FROM_ALL
+qt_add_executable(TestReaders EXCLUDE_FROM_ALL
   test_readers.cpp
   ../src/samplepack.cpp
   ../src/sink.cpp
@@ -70,18 +70,18 @@ add_executable(TestReaders EXCLUDE_FROM_ALL
   ../src/numberformat.cpp
   ${UI_FILES_T}
   )
-qt5_use_modules(TestReaders Widgets Test)
+target_link_libraries(TestReaders PRIVATE Qt6::Widgets Qt6::Test)
 add_test(NAME test_readers COMMAND TestReaders)
 
 # test for recroder
-add_executable(TestRecorder EXCLUDE_FROM_ALL
+qt_add_executable(TestRecorder EXCLUDE_FROM_ALL
   test_recorder.cpp
   ../src/samplepack.cpp
   ../src/sink.cpp
   ../src/source.cpp
   ../src/datarecorder.cpp
 )
-qt5_use_modules(TestRecorder Widgets Test)
+target_link_libraries(TestRecorder PRIVATE Qt6::Widgets Qt6::Test)
 add_test(NAME test_recorder COMMAND TestRecorder)
 
 set(CMAKE_CTEST_COMMAND ctest -V)

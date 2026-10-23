@@ -77,6 +77,14 @@ signals:
     void channelAdded(const StreamChannel* chan);
     void channelNameChanged(unsigned channel, QString name); // TODO: does it stay?
     void dataAdded(); ///< emitted when data added to channel man.
+    /**
+     * Emitted when the X buffer object itself is replaced, i.e. when the
+     * `XFrameBuffer` pointers returned by `StreamChannel::xData()` change.
+     *
+     * Anyone holding such a pointer (plot curves etc.) must re-read it,
+     * the previous buffer is deleted right after this signal is emitted.
+     */
+    void xBufferChanged();
 
 public slots:
     /// Change number of samples (buffer size)

@@ -47,7 +47,9 @@ TEST_CASE("test recording single channel", "[recorder]")
     }
 
     // test
-    rec.startRecording(fileName, ",", channelNames, false);
+    rec.setDecimals(0); // the file should contain whole numbers
+    rec.startRecording(fileName, ",", channelNames,
+                       DataRecorder::TimestampOption::disabled);
     source._feed(samples);
     rec.stopRecording();
 
@@ -87,7 +89,9 @@ TEST_CASE("test recording multiple channels", "[recorder]")
     }
 
     // test
-    rec.startRecording(fileName, ",", channelNames, false);
+    rec.setDecimals(0); // the file should contain whole numbers
+    rec.startRecording(fileName, ",", channelNames,
+                       DataRecorder::TimestampOption::disabled);
     source._feed(samples);
     rec.stopRecording();
 

@@ -37,6 +37,18 @@ AsciiReaderSettings::AsciiReaderSettings(QWidget *parent) :
 
     ui->spNumOfChannels->setMaximum(MAX_NUM_CHANNELS);
 
+    // All radio buttons in this widget are siblings, so Qt's automatic
+    // exclusivity makes the unrelated delimiter and filter groups uncheck
+    // each other. The last one enabled in the .ui wins and the delimiter
+    // group ends up with nothing checked, which silently falls back to the
+    // custom delimiter (and thus to "no data parsed" for CSV input).
+    // Exclusivity inside each group is provided by the QButtonGroups below.
+    for (auto button : {ui->rbComma, ui->rbSpace, ui->rbTab, ui->rbOtherDelimiter,
+                        ui->rbFilterDisabled, ui->rbFilterInclude, ui->rbFilterExclude})
+    {
+        button->setAutoExclusive(false);
+    }
+
     delimiterButtons.addButton(ui->rbComma);
     delimiterButtons.addButton(ui->rbSpace);
     delimiterButtons.addButton(ui->rbTab);
@@ -45,6 +57,16 @@ AsciiReaderSettings::AsciiReaderSettings(QWidget *parent) :
     filterButtons.addButton(ui->rbFilterDisabled, (int) FilterMode::disabled);
     filterButtons.addButton(ui->rbFilterInclude, (int) FilterMode::include);
     filterButtons.addButton(ui->rbFilterExclude, (int) FilterMode::exclude);
+
+    // restore the defaults that were lost while auto exclusivity was active
+    if (delimiterButtons.checkedButton() == nullptr)
+    {
+        ui->rbComma->setChecked(true);
+    }
+    if (filterButtons.checkedButton() == nullptr)
+    {
+        ui->rbFilterDisabled->setChecked(true);
+    }
 
     // delimiter buttons signals
     connect(ui->rbComma, &QAbstractButton::toggled,

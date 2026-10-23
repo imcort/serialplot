@@ -81,7 +81,7 @@ void RingBuffer::resize(unsigned n)
     }
 
     // data is ready, clean up and re-point
-    delete data;
+    delete[] data;
     data = newData;
     headIndex = 0;
     _size = n;

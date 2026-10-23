@@ -220,7 +220,8 @@ TEST_CASE("LinIndexBuffer", "[memory, buffer]")
     REQUIRE(l.end == 5.0);
 
     REQUIRE(buf.sample(0) == -5.0);
-    REQUIRE(buf.sample(19) == 5.0);
+    // computed as `start + i * step`, so it is not exactly 5.0
+    REQUIRE(buf.sample(19) == Approx(5.0));
 
     buf.resize(10);
     buf.setLimits({0., 3.});

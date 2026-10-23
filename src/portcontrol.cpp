@@ -46,6 +46,10 @@ static const int BLE_RECONNECT_INTERVAL_MS = 2000;
 static const char* DEFAULT_TCP_HOST = "127.0.0.1";
 static const int DEFAULT_TCP_PORT = 9000;
 
+/// Upper bound for the transport option boxes, so that a very wide window
+/// doesn't turn them into full width bands
+static const int MAX_CONTROL_WIDTH = 460;
+
 static QString bleIdText(const QBluetoothDeviceInfo& info)
 {
     QString address = info.address().toString().trimmed();
@@ -72,6 +76,7 @@ PortControl::PortControl(QSerialPort* serialPort,
     openAction("Open", this),
     loadPortListAction("↺", this),
     tcpSocket(),
+    tcpReportedOpen(false),
     cbTransport(nullptr),
     cbBleDevice(nullptr),
     gbBle(nullptr),
@@ -293,12 +298,23 @@ PortControl::PortControl(QSerialPort* serialPort,
     bleLayout->addLayout(deviceRow);
 
     auto form = new QFormLayout();
+    // The default growth policy is style dependent and on macOS keeps the
+    // fields squeezed to their size hint, which made the input boxes
+    // unusable. Let them use the available width instead.
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    form->setRowWrapPolicy(QFormLayout::DontWrapRows);
     leBleServiceUuid = new QLineEdit(DEFAULT_BLE_SERVICE_UUID, gbBle);
     leBleNotifyUuid = new QLineEdit(DEFAULT_BLE_NOTIFY_UUID, gbBle);
     leBleWriteUuid = new QLineEdit(DEFAULT_BLE_WRITE_UUID, gbBle);
     leBleServiceUuid->setPlaceholderText(DEFAULT_BLE_SERVICE_UUID);
     leBleNotifyUuid->setPlaceholderText(DEFAULT_BLE_NOTIFY_UUID);
     leBleWriteUuid->setPlaceholderText(DEFAULT_BLE_WRITE_UUID);
+    // A UUID has to fit into the field, otherwise the user cannot check it
+    const int uuidWidth = leBleServiceUuid->fontMetrics().horizontalAdvance(DEFAULT_BLE_SERVICE_UUID) + 16;
+    for (auto* le : {leBleServiceUuid, leBleNotifyUuid, leBleWriteUuid})
+    {
+        le->setMinimumWidth(uuidWidth);
+    }
     form->addRow(tr("Service UUID:"), leBleServiceUuid);
     cbBleFilterByServiceUuid = new QCheckBox(tr("Only show devices advertising this service"), gbBle);
     form->addRow(QString(), cbBleFilterByServiceUuid);
@@ -347,14 +363,22 @@ PortControl::PortControl(QSerialPort* serialPort,
     lbBleStatus = new QLabel(tr("Idle"), gbBle);
     bleLayout->addWidget(lbBleStatus);
 
-    static_cast<QVBoxLayout*>(ui->verticalLayout_3)->addWidget(gbBle);
+    // Take only as much height as the content needs, and sit right below the
+    // serial controls (index 2) instead of after the trailing spacer.
+    gbBle->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    gbBle->setMaximumWidth(MAX_CONTROL_WIDTH);
+    static_cast<QVBoxLayout*>(ui->verticalLayout_3)->insertWidget(2, gbBle);
 
     gbTcp = new QGroupBox(tr("TCP"), this);
     gbTcp->setObjectName("gbTcp");
     auto tcpForm = new QFormLayout(gbTcp);
+    tcpForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    tcpForm->setRowWrapPolicy(QFormLayout::DontWrapRows);
     leTcpHost = new QLineEdit(DEFAULT_TCP_HOST, gbTcp);
     leTcpHost->setObjectName("leTcpHost");
     leTcpHost->setPlaceholderText(tr("IP address or host name"));
+    // keep a full IP address readable
+    leTcpHost->setMinimumWidth(leTcpHost->fontMetrics().horizontalAdvance("000.000.000.000") + 16);
     sbTcpPort = new QSpinBox(gbTcp);
     sbTcpPort->setObjectName("sbTcpPort");
     sbTcpPort->setRange(1, 65535);
@@ -365,7 +389,26 @@ PortControl::PortControl(QSerialPort* serialPort,
     lbTcpStatus = new QLabel(tr("Idle"), gbTcp);
     lbTcpStatus->setObjectName("lbTcpStatus");
     tcpForm->addRow(QString(), lbTcpStatus);
-    static_cast<QVBoxLayout*>(ui->verticalLayout_3)->addWidget(gbTcp);
+    // Take only as much height as the content needs, and sit right below the
+    // serial controls (index 2) instead of after the trailing spacer.
+    gbTcp->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    gbTcp->setMaximumWidth(MAX_CONTROL_WIDTH);
+    static_cast<QVBoxLayout*>(ui->verticalLayout_3)->insertWidget(2, gbTcp);
+
+    // The column has no vertically expanding item once the pin LEDs are
+    // hidden, which made the layout spread its entries over the whole height.
+    // Keep everything at the top and let the spacer take the rest.
+    static_cast<QVBoxLayout*>(ui->verticalLayout_3)->addStretch(1);
+
+    // The spacer between the controls column and the "Open" button used to
+    // take all the extra width, which kept the column (and therefore every
+    // input inside it) at its minimum size. Let the column grow as well,
+    // but only inside the serial grid's value column so that the labels stay
+    // next to their widgets.
+    ui->horizontalLayout->setStretch(0, 1);
+    ui->gridLayout->setColumnStretch(0, 0);
+    ui->gridLayout->setColumnStretch(1, 1);
+    ui->gridLayout->setColumnStretch(2, 0);
 
     applyModeUi();
     emit deviceChanged(activeDevice());
@@ -546,6 +589,11 @@ void PortControl::togglePort()
     {
         connectBle();
     }
+
+    // `connectBle` can fail synchronously (no device selected, invalid UUIDs...)
+    // as well as asynchronously. Keep the button in sync with reality; a
+    // successful connection reports itself through onBleConnectedChanged.
+    openAction.setChecked(bleDevice->isOpen());
 }
 
 void PortControl::selectListedPort(QString portName)
@@ -1266,6 +1314,7 @@ void PortControl::onTcpConnected()
     }
 
     openAction.setChecked(true);
+    tcpReportedOpen = true;
     lbTcpStatus->setText(tr("TCP connected to %1:%2.")
                          .arg(leTcpHost->text().trimmed())
                          .arg(sbTcpPort->value()));
@@ -1278,6 +1327,11 @@ void PortControl::onTcpDisconnected()
     if (isTcpMode())
     {
         lbTcpStatus->setText(tr("TCP disconnected."));
+    }
+
+    if (tcpReportedOpen)
+    {
+        tcpReportedOpen = false;
         emit portToggled(false);
     }
 }
@@ -1290,5 +1344,14 @@ void PortControl::onTcpError(QAbstractSocket::SocketError error)
     {
         lbTcpStatus->setText(tr("TCP error: %1").arg(tcpSocket.errorString()));
         qWarning() << "TCP error:" << tcpSocket.errorString();
+    }
+
+    // A failed connect attempt can end up in UnconnectedState without a
+    // `disconnected()` signal being emitted, so listeners would never learn
+    // that the port is gone (recording keeps running, sps doesn't reset).
+    if (tcpReportedOpen && tcpSocket.state() == QAbstractSocket::UnconnectedState)
+    {
+        tcpReportedOpen = false;
+        emit portToggled(false);
     }
 }

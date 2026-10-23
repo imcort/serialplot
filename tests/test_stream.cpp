@@ -19,6 +19,8 @@
 
 #include "stream.h"
 
+#include <QSignalSpy>
+
 #include "catch.hpp"
 #include "test_helpers.h"
 
@@ -249,4 +251,33 @@ TEST_CASE("clear stream data", "[memory, stream, pause]")
             REQUIRE(y->sample(i) == 0);
         }
     }
+}
+
+TEST_CASE("changing X axis replaces the X buffer", "[memory, stream, x]")
+{
+    Stream s(3, false, 10);
+
+    const XFrameBuffer* oldX = s.channel(0)->xData();
+    for (unsigned ci = 1; ci < 3; ci++)
+    {
+        REQUIRE(s.channel(ci)->xData() == oldX);
+    }
+
+    // the old buffer is deleted, whoever holds its pointer must be notified
+    QSignalSpy spy(&s, SIGNAL(xBufferChanged()));
+
+    s.setXAxis(false, 0., 100.);
+
+    REQUIRE(spy.count() == 1);
+
+    const XFrameBuffer* newX = s.channel(0)->xData();
+    REQUIRE(newX != oldX);
+    for (unsigned ci = 1; ci < 3; ci++)
+    {
+        REQUIRE(s.channel(ci)->xData() == newX);
+    }
+
+    // new scale is in effect
+    REQUIRE(newX->sample(0) == Approx(0.));
+    REQUIRE(newX->sample(9) == Approx(100.));
 }

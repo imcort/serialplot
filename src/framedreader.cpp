@@ -433,8 +433,12 @@ double FramedReader::readSampleAsUint24()
 double FramedReader::readSampleAsInt24()
 {
     const quint32 value = static_cast<quint32>(readSampleAsUint24());
+    // Two's complement sign extension. `value` always fits into qint32, so
+    // subtracting the modulus keeps this well defined (casting an out of
+    // range unsigned value to a signed type is implementation defined
+    // before C++20).
     const qint32 signedValue = (value & 0x800000U)
-        ? static_cast<qint32>(value | 0xFF000000U)
+        ? static_cast<qint32>(value) - 0x1000000
         : static_cast<qint32>(value);
     return static_cast<double>(signedValue);
 }

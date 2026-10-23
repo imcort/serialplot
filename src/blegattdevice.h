@@ -83,6 +83,7 @@ private:
     QBluetoothUuid _notifyUuid;
     QBluetoothUuid _writeUuid;
     QByteArray readBuffer;
+    int readPos;  ///< read position inside `readBuffer`
 
     bool ready;
     bool scanning;

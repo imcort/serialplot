@@ -27,6 +27,12 @@
 #include "plotmanager.h"
 #include "setting_defines.h"
 
+/// Minimum time between two redraws triggered by incoming data (ms).
+///
+/// 30 Hz is plenty for a scrolling plot and leaves most of the GUI thread
+/// to the reader, which is what actually must not fall behind.
+static const int MIN_REPLOT_INTERVAL_MS = 33;
+
 PlotManager::PlotManager(QWidget* plotArea, PlotMenu* menu,
                          const Stream* stream, QObject* parent) :
     QObject(parent)
@@ -48,7 +54,8 @@ PlotManager::PlotManager(QWidget* plotArea, PlotMenu* menu,
             });
 
     connect(stream, &Stream::numChannelsChanged, this, &PlotManager::onNumChannelsChanged);
-    connect(stream, &Stream::dataAdded, this, &PlotManager::replot);
+    connect(stream, &Stream::dataAdded, this, &PlotManager::requestReplot);
+    connect(stream, &Stream::xBufferChanged, this, &PlotManager::onXBufferChanged);
 
     // add initial curves if any?
     for (unsigned int i = 0; i < stream->numChannels(); i++)
@@ -99,6 +106,10 @@ void PlotManager::construct(QWidget* plotArea, PlotMenu* menu)
     // initalize layout and single widget
     isMulti = false;
     scrollArea = NULL;
+
+    // coalesce redraws triggered by incoming data
+    replotTimer.setSingleShot(true);
+    connect(&replotTimer, &QTimer::timeout, this, &PlotManager::replotNow);
 
     // connect to  menu
     connect(menu, &PlotMenu::symbolShowChanged, this, &PlotManager::setSymbols);
@@ -165,6 +176,21 @@ void PlotManager::onNumChannelsChanged(unsigned value)
     replot();
 }
 
+void PlotManager::onXBufferChanged()
+{
+    if (_stream == nullptr) return;
+
+    for (unsigned i = 0; i < curves.size(); i++)
+    {
+        // curves are in the same order as stream channels (see addCurve calls)
+        auto series = const_cast<FrameBufferSeries*>(
+            static_cast<const FrameBufferSeries*>(curves[i]->data()));
+        series->setX(_stream->channel(i)->xData());
+    }
+
+    replot();
+}
+
 void PlotManager::onChannelInfoChanged(const QModelIndex &topLeft,
                                        const QModelIndex &bottomRight,
                                        const QVector<int> &roles)
@@ -183,24 +209,23 @@ void PlotManager::onChannelInfoChanged(const QModelIndex &topLeft,
         curves[ci]->setVisible(visible);
         curves[ci]->setItemAttribute(QwtPlotItem::Legend, visible);
 
-        // replot only updated widgets
+        // apply the change to the corresponding widget
         if (isMulti)
         {
             plotWidgets[ci]->updateSymbols(); // required for color change
             plotWidgets[ci]->updateLegend(curves[ci]);
             plotWidgets[ci]->setVisible(visible);
-            if (visible)
-            {
-                plotWidgets[ci]->replot();
-            }
-            syncScales();
         }
     }
 
     checkNoVisChannels();
 
-    // replot single widget
-    if (!isMulti)
+    // replot everything once instead of once per changed channel
+    if (isMulti)
+    {
+        replot();
+    }
+    else
     {
         plotWidgets[0]->updateSymbols();
         plotWidgets[0]->updateLegend();
@@ -490,6 +515,48 @@ Plot* PlotManager::plotWidget(unsigned curveIndex)
 
 void PlotManager::replot()
 {
+    // An explicit request (menu action, settings change, clear...) must not
+    // wait for the throttling timer, but it does reset the throttling clock
+    // so that a data driven redraw doesn't follow immediately.
+    replotTimer.stop();
+    replotNow();
+}
+
+void PlotManager::requestReplot()
+{
+    if (!lastReplot.isValid())
+    {
+        replotNow();
+        return;
+    }
+
+    const int remaining = MIN_REPLOT_INTERVAL_MS - int(lastReplot.elapsed());
+    if (remaining <= 0)
+    {
+        replotTimer.stop();
+        replotNow();
+        return;
+    }
+
+    // Redraw when the interval expires. If data keeps arriving, this fires
+    // at a steady rate; if it stops, the last batch is still drawn.
+    if (!replotTimer.isActive())
+    {
+        replotTimer.start(remaining);
+    }
+}
+
+void PlotManager::replotNow()
+{
+    lastReplot.start();
+
+    if (isMulti && !inScaleSync)
+    {
+        // `syncScales` redraws every plot itself, no need to redraw twice
+        syncScales();
+        return;
+    }
+
     for (auto plot : plotWidgets)
     {
         plot->replot();
