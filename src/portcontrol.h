@@ -38,6 +38,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QToolButton>
 
 #include <QBluetoothDeviceInfo>
 #include <QBluetoothUuid>
@@ -56,11 +57,14 @@ class PortControl : public QWidget
 public:
     explicit PortControl(QSerialPort* serialPort,
                          BleGattDevice* bleDevice,
+                         QSerialPort* markerPort,
                          QWidget* parent = 0);
     ~PortControl();
 
     QSerialPort* serialPort;
     BleGattDevice* bleDevice;
+    /// Auxiliary device that only places markers (see `MarkerPort`)
+    QSerialPort* markerPort;
     QIODevice* tcpDevice();
     QToolBar* toolBar();
     QIODevice* activeDevice();
@@ -98,6 +102,9 @@ private:
     QList<QBluetoothDeviceInfo> scannedBleDevices;
 
     QTcpSocket tcpSocket;
+    /// True while the main port is open. The marker input is locked then,
+    /// see `updateMarkerUi()`.
+    bool mainPortOpen;
     /// Tracks whether `portToggled(true)` was emitted for the TCP socket,
     /// so that the matching `false` is emitted exactly once
     bool tcpReportedOpen;
@@ -117,6 +124,14 @@ private:
     QSpinBox* sbTcpPort;
     QLabel* lbTcpStatus;
     QAction scanBleAction;
+
+    // marker input widgets
+    QGroupBox* gbMarker;
+    QComboBox* cbMarkerPort;
+    QComboBox* cbMarkerBaud;
+    QToolButton* pbMarkerConnect;
+    QToolButton* pbMarkerRefresh;
+    QLabel* lbMarkerStatus;
 
     /// Used to refresh pinout signal leds periodically
     QTimer pinUpdateTimer;
@@ -140,6 +155,9 @@ private:
     void disconnectBle();
     void connectTcp();
     void disconnectTcp();
+    void loadMarkerPortList();
+    void toggleMarkerPort();
+    void updateMarkerUi();
     QString bleDeviceDisplayName(const QBluetoothDeviceInfo& info) const;
     /// Returns currently selected parity as text to be saved in settings
     QString currentParityText();
@@ -168,10 +186,13 @@ private slots:
     void onTcpConnected();
     void onTcpDisconnected();
     void onTcpError(QAbstractSocket::SocketError error);
+    void onMarkerPortError(QSerialPort::SerialPortError error);
 
 signals:
     void portToggled(bool open);
     void deviceChanged(QIODevice* device);
+    /// Emitted when the auxiliary marker port is opened or closed
+    void markerPortToggled(bool open);
 };
 
 #endif // PORTCONTROL_H

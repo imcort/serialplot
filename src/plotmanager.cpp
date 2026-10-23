@@ -56,6 +56,7 @@ PlotManager::PlotManager(QWidget* plotArea, PlotMenu* menu,
     connect(stream, &Stream::numChannelsChanged, this, &PlotManager::onNumChannelsChanged);
     connect(stream, &Stream::dataAdded, this, &PlotManager::requestReplot);
     connect(stream, &Stream::xBufferChanged, this, &PlotManager::onXBufferChanged);
+    connect(stream, &Stream::markersChanged, this, &PlotManager::requestReplot);
 
     // add initial curves if any?
     for (unsigned int i = 0; i < stream->numChannels(); i++)
@@ -140,6 +141,8 @@ void PlotManager::construct(QWidget* plotArea, PlotMenu* menu)
 
 PlotManager::~PlotManager()
 {
+    deleteMarkerItems();
+
     while (curves.size())
     {
         delete curves.takeLast();
@@ -153,6 +156,16 @@ PlotManager::~PlotManager()
 
     if (scrollArea != NULL) delete scrollArea;
     if (emptyPlot != NULL) delete emptyPlot;
+}
+
+void PlotManager::deleteMarkerItems()
+{
+    for (auto item : markerItems)
+    {
+        item->detach();
+        delete item;
+    }
+    markerItems.clear();
 }
 
 void PlotManager::onNumChannelsChanged(unsigned value)
@@ -256,6 +269,9 @@ void PlotManager::setMulti(bool enabled)
     {
         curve->detach();
     }
+
+    // marker items are attached to the widgets that are about to be deleted
+    deleteMarkerItems();
 
     // remove all widgets
     while (plotWidgets.size())
@@ -373,6 +389,13 @@ Plot* PlotManager::addPlotWidget()
     else
     {
         plot->setXAxis(_xMin, _xMax);
+    }
+
+    if (_stream != nullptr)
+    {
+        auto markerItem = new MarkerPlotItem(_stream);
+        markerItem->attach(plot);
+        markerItems.append(markerItem);
     }
 
     if (isMulti)

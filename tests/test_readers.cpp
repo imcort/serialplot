@@ -29,6 +29,7 @@
 #include "framedreader.h"
 #include "demoreader.h"
 #include "numberformatbox.h"
+#include "markerport.h"
 #include "endiannessbox.h"
 #include "binarystreamreadersettings.h"
 #include "framedreadersettings.h"
@@ -506,4 +507,41 @@ TEST_CASE("24 bit samples of several channels are not interleaved wrongly", "[re
         REQUIRE(sink.lastRow[0] == 1.0);
         REQUIRE(sink.lastRow[1] == -1.0);
     }
+}
+
+TEST_CASE("MarkerPort reports every character with its value", "[reader, marker]")
+{
+    QBuffer bufferDev;
+    bufferDev.open(QIODevice::ReadWrite);
+
+    MarkerPort markerPort(&bufferDev);
+    QSignalSpy spy(&markerPort, SIGNAL(markerReceived(QChar)));
+
+    // `QBuffer` is not sequential: after `write()` the read position is at the
+    // end, so it has to be rewound for `readAll()`. A serial port doesn't need
+    // this, it always reads the freshly received bytes.
+    auto send = [&bufferDev](const QByteArray& data)
+    {
+        bufferDev.write(data);
+        bufferDev.seek(bufferDev.pos() - data.size());
+    };
+
+    send("aX");
+    QCoreApplication::processEvents();
+
+    REQUIRE(spy.count() == 2);
+    REQUIRE(spy.at(0).at(0).value<QChar>() == QChar('a'));
+    REQUIRE(spy.at(1).at(0).value<QChar>() == QChar('X'));
+
+    // line endings are characters too, they are reported as they are
+    send("\r\n");
+    QCoreApplication::processEvents();
+
+    REQUIRE(spy.count() == 4);
+    REQUIRE(spy.at(2).at(0).value<QChar>() == QChar('\r'));
+    REQUIRE(spy.at(3).at(0).value<QChar>() == QChar('\n'));
+
+    // nothing to read, nothing emitted
+    QCoreApplication::processEvents();
+    REQUIRE(spy.count() == 4);
 }

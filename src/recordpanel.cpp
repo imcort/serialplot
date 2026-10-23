@@ -179,8 +179,9 @@ QString RecordPanel::getSelectedFile()
 
 QString RecordPanel::formatTimeStamp(QString t) const
 {
-    auto maxSize = t.size() + 1024;
-    auto r = new char[maxSize];
+    const auto maxSize = t.size() + 1024;
+    QByteArray buffer(maxSize, 0);
+    char* r = buffer.data();
 
     time_t rawtime;
     struct tm * timeinfo;
@@ -189,9 +190,7 @@ QString RecordPanel::formatTimeStamp(QString t) const
     timeinfo = localtime (&rawtime);
     strftime(r, maxSize, t.toLatin1().data(), timeinfo);
 
-    auto rs = QString(r);
-    delete r;
-    return rs;
+    return QString(r);
 }
 
 void RecordPanel::onRecord(bool start)
@@ -311,10 +310,19 @@ bool RecordPanel::startRecording(QString fileName)
 {
     QStringList channelNames;
 
+    // markers get their own column, the recorder appends the values itself
+    const bool withMarkers = _stream->markersEnabled();
+
     if (ui->cbHeader->isChecked())
     {
         channelNames = _stream->infoModel()->channelNames();
+        if (withMarkers)
+        {
+            channelNames << tr("Marker") << tr("Marker Value");
+        }
     }
+
+    recorder.setMarkerProvider(withMarkers ? _stream : nullptr);
 
     if (recorder.startRecording(fileName, getSeparator(), channelNames, currentTimestampOption()))
     {
@@ -330,6 +338,7 @@ bool RecordPanel::startRecording(QString fileName)
 void RecordPanel::stopRecording(void)
 {
     recorder.stopRecording();
+    recorder.setMarkerProvider(nullptr);
     _stream->disconnectFollower(&recorder);
 }
 

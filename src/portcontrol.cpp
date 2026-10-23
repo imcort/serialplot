@@ -69,6 +69,7 @@ const QMap<QSerialPort::Parity, QString> paritySettingMap({
 
 PortControl::PortControl(QSerialPort* serialPort,
                          BleGattDevice* bleDevice,
+                         QSerialPort* markerPort,
                          QWidget* parent) :
     QWidget(parent),
     ui(new Ui::PortControl),
@@ -76,6 +77,7 @@ PortControl::PortControl(QSerialPort* serialPort,
     openAction("Open", this),
     loadPortListAction("↺", this),
     tcpSocket(),
+    mainPortOpen(false),
     tcpReportedOpen(false),
     cbTransport(nullptr),
     cbBleDevice(nullptr),
@@ -92,6 +94,12 @@ PortControl::PortControl(QSerialPort* serialPort,
     sbTcpPort(nullptr),
     lbTcpStatus(nullptr),
     scanBleAction("Scan BLE", this),
+    gbMarker(nullptr),
+    cbMarkerPort(nullptr),
+    cbMarkerBaud(nullptr),
+    pbMarkerConnect(nullptr),
+    pbMarkerRefresh(nullptr),
+    lbMarkerStatus(nullptr),
     bleConnectionDesired(false),
     bleAutoReconnectArmed(false),
     bleReconnectAttemptInProgress(false)
@@ -100,10 +108,20 @@ PortControl::PortControl(QSerialPort* serialPort,
 
     this->serialPort = serialPort;
     this->bleDevice = bleDevice;
+    this->markerPort = markerPort;
     transportMode = TransportMode::Serial;
 
     connect(this->serialPort, &QSerialPort::errorOccurred,
             this, &PortControl::onPortError);
+    connect(this->markerPort, &QSerialPort::errorOccurred,
+            this, &PortControl::onMarkerPortError);
+    // the marker controls are locked while the main port is open
+    connect(this, &PortControl::portToggled,
+            this, [this](bool open)
+            {
+                mainPortOpen = open;
+                updateMarkerUi();
+            });
     connect(this->bleDevice, &BleGattDevice::connectedChanged,
             this, &PortControl::onBleConnectedChanged);
     connect(this->bleDevice, &BleGattDevice::devicesChanged,
@@ -410,6 +428,63 @@ PortControl::PortControl(QSerialPort* serialPort,
     ui->gridLayout->setColumnStretch(1, 1);
     ui->gridLayout->setColumnStretch(2, 0);
 
+    // marker input (auxiliary tagger device)
+    gbMarker = new QGroupBox(tr("Marker input"), this);
+    gbMarker->setObjectName("gbMarker");
+    auto markerLayout = new QGridLayout(gbMarker);
+    markerLayout->setColumnStretch(1, 1);
+
+    cbMarkerPort = new QComboBox(gbMarker);
+    cbMarkerPort->setObjectName("cbMarkerPort");
+    cbMarkerPort->setEditable(true);
+    cbMarkerPort->setToolTip(tr("Auxiliary serial port of the tagging device. "
+                                "Every received character places a marker."));
+    pbMarkerRefresh = new QToolButton(gbMarker);
+    pbMarkerRefresh->setText(QString::fromUtf8("↺"));
+    pbMarkerRefresh->setToolTip(tr("Reload the port list"));
+    connect(pbMarkerRefresh, &QToolButton::clicked,
+            this, &PortControl::loadMarkerPortList);
+
+    cbMarkerBaud = new QComboBox(gbMarker);
+    cbMarkerBaud->setObjectName("cbMarkerBaud");
+    cbMarkerBaud->setEditable(true);
+    for (auto baudRate : QSerialPortInfo::standardBaudRates())
+    {
+        cbMarkerBaud->addItem(QString::number(baudRate));
+    }
+    cbMarkerBaud->setCurrentIndex(cbMarkerBaud->findText("115200"));
+
+    pbMarkerConnect = new QToolButton(gbMarker);
+    pbMarkerConnect->setObjectName("pbMarkerConnect");
+    pbMarkerConnect->setCheckable(true);
+    pbMarkerConnect->setText(tr("Connect"));
+    connect(pbMarkerConnect, &QToolButton::clicked,
+            this, &PortControl::toggleMarkerPort);
+
+    lbMarkerStatus = new QLabel(tr("Disconnected"), gbMarker);
+    lbMarkerStatus->setObjectName("lbMarkerStatus");
+
+    markerLayout->addWidget(new QLabel(tr("Port:"), gbMarker), 0, 0);
+    markerLayout->addWidget(cbMarkerPort, 0, 1);
+    markerLayout->addWidget(pbMarkerRefresh, 0, 2);
+    markerLayout->addWidget(new QLabel(tr("Baud rate:"), gbMarker), 1, 0);
+    markerLayout->addWidget(cbMarkerBaud, 1, 1);
+    markerLayout->addWidget(pbMarkerConnect, 1, 2);
+    markerLayout->addWidget(lbMarkerStatus, 2, 0, 1, 3);
+
+    gbMarker->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    gbMarker->setMaximumWidth(MAX_CONTROL_WIDTH);
+
+    // keep the marker box above the trailing stretch, the transport specific
+    // boxes (BLE/TCP) are kept above it already
+    {
+        auto* column = static_cast<QVBoxLayout*>(ui->verticalLayout_3);
+        column->insertWidget(column->count() - 1, gbMarker);
+    }
+
+    loadMarkerPortList();
+    updateMarkerUi();
+
     applyModeUi();
     emit deviceChanged(activeDevice());
 }
@@ -436,6 +511,129 @@ void PortControl::loadPortList()
     else
     {
         ui->cbPortList->lineEdit()->setPlaceholderText(tr("Select port or enter name"));
+    }
+}
+
+void PortControl::loadMarkerPortList()
+{
+    const QString current = cbMarkerPort->currentText().trimmed();
+    cbMarkerPort->clear();
+
+    for (const auto& info : QSerialPortInfo::availablePorts())
+    {
+        cbMarkerPort->addItem(info.portName());
+    }
+
+    if (!current.isEmpty())
+    {
+        const int index = cbMarkerPort->findText(current);
+        if (index >= 0)
+        {
+            cbMarkerPort->setCurrentIndex(index);
+        }
+        else
+        {
+            cbMarkerPort->setEditText(current);
+        }
+    }
+
+    if (cbMarkerPort->count() == 0)
+    {
+        cbMarkerPort->lineEdit()->setPlaceholderText(tr("No port found - enter name"));
+    }
+    else
+    {
+        cbMarkerPort->lineEdit()->setPlaceholderText(tr("Select port or enter name"));
+    }
+}
+
+void PortControl::toggleMarkerPort()
+{
+    if (markerPort->isOpen())
+    {
+        markerPort->close();
+        lbMarkerStatus->setText(tr("Disconnected"));
+        updateMarkerUi();
+        emit markerPortToggled(false);
+        return;
+    }
+
+    const QString portName = cbMarkerPort->currentText().trimmed();
+    if (portName.isEmpty())
+    {
+        lbMarkerStatus->setText(tr("Select a port first."));
+        updateMarkerUi();
+        return;
+    }
+
+    bool ok = false;
+    const int baudRate = cbMarkerBaud->currentText().trimmed().toInt(&ok);
+    if (!ok || baudRate <= 0)
+    {
+        lbMarkerStatus->setText(tr("Invalid baud rate."));
+        updateMarkerUi();
+        return;
+    }
+
+    markerPort->setPortName(portName);
+    markerPort->setBaudRate(baudRate);
+    markerPort->setParity(QSerialPort::NoParity);
+    markerPort->setDataBits(QSerialPort::Data8);
+    markerPort->setStopBits(QSerialPort::OneStop);
+    markerPort->setFlowControl(QSerialPort::NoFlowControl);
+
+    if (markerPort->open(QIODevice::ReadOnly))
+    {
+        lbMarkerStatus->setText(tr("Connected to %1 @ %2 baud").arg(portName).arg(baudRate));
+        updateMarkerUi();
+        emit markerPortToggled(true);
+    }
+    else
+    {
+        lbMarkerStatus->setText(tr("Failed to open %1: %2")
+                                .arg(portName, markerPort->errorString()));
+        updateMarkerUi();
+    }
+}
+
+void PortControl::updateMarkerUi()
+{
+    const bool open = markerPort->isOpen();
+
+    // The marker input has to be set up before the acquisition starts: the
+    // recorded columns are decided when recording begins, so a marker port
+    // that is connected later would silently produce no markers at all.
+    const bool locked = mainPortOpen;
+
+    pbMarkerConnect->setChecked(open);
+    pbMarkerConnect->setText(open ? tr("Disconnect") : tr("Connect"));
+    pbMarkerConnect->setEnabled(!locked);
+    pbMarkerConnect->setToolTip(locked ? tr("Close the main port to change the marker input.") : QString());
+
+    cbMarkerPort->setEnabled(!open && !locked);
+    cbMarkerBaud->setEnabled(!open && !locked);
+    pbMarkerRefresh->setEnabled(!open && !locked);
+}
+
+void PortControl::onMarkerPortError(QSerialPort::SerialPortError error)
+{
+    if (error == QSerialPort::NoError || !markerPort->isOpen())
+    {
+        return;
+    }
+
+    // the device is gone (unplugged, permissions revoked...) so the markers
+    // will never arrive, reflect that in the UI
+    if (error == QSerialPort::ResourceError ||
+        error == QSerialPort::DeviceNotFoundError ||
+        error == QSerialPort::PermissionError)
+    {
+        const QString message = markerPort->errorString();
+        qWarning() << "Marker port error:" << message;
+        markerPort->close();
+        lbMarkerStatus->setText(tr("Disconnected: %1").arg(message));
+        updateMarkerUi();
+        emit markerPortToggled(false);
     }
 }
 
@@ -846,6 +1044,8 @@ void PortControl::saveSettings(QSettings* settings)
     settings->setValue(SG_Port_BleWriteUuid, leBleWriteUuid->text().trimmed());
     settings->setValue(SG_Port_TcpHost, leTcpHost->text().trimmed());
     settings->setValue(SG_Port_TcpPort, sbTcpPort->value());
+    settings->setValue(SG_Port_MarkerPort, cbMarkerPort->currentText().trimmed());
+    settings->setValue(SG_Port_MarkerBaud, cbMarkerBaud->currentText().trimmed());
     settings->endGroup();
 }
 
@@ -862,6 +1062,10 @@ void PortControl::loadSettings(QSettings* settings)
     if (isTcpMode() && tcpSocket.state() != QAbstractSocket::UnconnectedState)
     {
         togglePort();
+    }
+    if (markerPort->isOpen())
+    {
+        toggleMarkerPort();
     }
 
     settings->beginGroup(SettingGroup_Port);
@@ -939,6 +1143,30 @@ void PortControl::loadSettings(QSettings* settings)
     if (tcpPort >= sbTcpPort->minimum() && tcpPort <= sbTcpPort->maximum())
     {
         sbTcpPort->setValue(tcpPort);
+    }
+
+    // marker input
+    const QString markerPortName = settings->value(SG_Port_MarkerPort, QString()).toString();
+    if (!markerPortName.isEmpty())
+    {
+        const int index = cbMarkerPort->findText(markerPortName);
+        if (index >= 0)
+        {
+            cbMarkerPort->setCurrentIndex(index);
+        }
+        else
+        {
+            cbMarkerPort->setEditText(markerPortName);
+        }
+    }
+    const QString markerBaud = settings->value(SG_Port_MarkerBaud, cbMarkerBaud->currentText()).toString();
+    if (cbMarkerBaud->findText(markerBaud) >= 0)
+    {
+        cbMarkerBaud->setCurrentIndex(cbMarkerBaud->findText(markerBaud));
+    }
+    else if (!markerBaud.isEmpty())
+    {
+        cbMarkerBaud->setEditText(markerBaud);
     }
 
     int modeValue = settings->value(SG_Port_TransportMode, (int)TransportMode::Serial).toInt();

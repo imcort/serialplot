@@ -66,7 +66,8 @@ MainWindow::MainWindow(QWidget *parent) :
     ui(new Ui::MainWindow),
     aboutDialog(this),
     bleDevice(this),
-    portControl(&serialPort, &bleDevice),
+    markerPort(&markerSerialPort),
+    portControl(&serialPort, &bleDevice, &markerSerialPort),
     secondaryPlot(NULL),
     snapshotMan(this, &stream),
     commandPanel(&serialPort),
@@ -183,6 +184,13 @@ MainWindow::MainWindow(QWidget *parent) :
                          QObject::connect(device, &QIODevice::aboutToClose,
                                           &recordPanel, &RecordPanel::onPortClose);
                      });
+
+    // marker input (auxiliary tagger) signals
+    QObject::connect(&markerPort, &MarkerPort::markerReceived,
+                     &stream, &Stream::addMarker);
+
+    QObject::connect(&portControl, &PortControl::markerPortToggled,
+                     &stream, &Stream::setMarkersEnabled);
 
     // plot control signals
     connect(&plotControlPanel, &PlotControlPanel::numOfSamplesChanged,
@@ -311,6 +319,10 @@ MainWindow::~MainWindow()
     if (serialPort.isOpen())
     {
         serialPort.close();
+    }
+    if (markerSerialPort.isOpen())
+    {
+        markerSerialPort.close();
     }
     if (portControl.tcpDevice()->isOpen())
     {

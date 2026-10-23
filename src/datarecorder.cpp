@@ -24,6 +24,23 @@
 #include <QDateTime>
 #include <QtDebug>
 
+/// Wraps a value in quotes when the CSV would otherwise be ambiguous
+static QString csvField(const QString& value, const QString& separator)
+{
+    const bool needsQuotes =
+        value.contains(separator) ||
+        value.contains('"') ||
+        value.contains('\n') ||
+        value.contains('\r') ||
+        (!value.isEmpty() && (value.front().isSpace() || value.back().isSpace()));
+
+    if (!needsQuotes) return value;
+
+    QString escaped = value;
+    escaped.replace('"', "\"\"");
+    return QString('"') + escaped + QString('"');
+}
+
 DataRecorder::DataRecorder(QObject *parent) :
     QObject(parent),
     fileStream(&file)
@@ -32,6 +49,9 @@ DataRecorder::DataRecorder(QObject *parent) :
     disableBuffering = false;
     windowsLE = false;
     timestampOpt = TimestampOption::disabled;
+    markerProvider = nullptr;
+    markerBase = 0;
+    writtenSamples = 0;
 
     fileStream.setRealNumberNotation(QTextStream::FixedNotation);
 }
@@ -41,12 +61,22 @@ void DataRecorder::setDecimals(unsigned decimals)
     fileStream.setRealNumberPrecision(decimals);
 }
 
+void DataRecorder::setMarkerProvider(const MarkerProvider* provider)
+{
+    markerProvider = provider;
+}
+
 bool DataRecorder::startRecording(QString fileName, QString separator,
                                   QStringList channelNames, TimestampOption ts)
 {
     Q_ASSERT(!file.isOpen());
     _sep =  separator;
     timestampOpt = ts;
+
+    // remember where the sample numbering starts, the marker indexes are
+    // absolute so the recording can start at any time
+    markerBase = (markerProvider != nullptr) ? markerProvider->totalSamples() : 0;
+    writtenSamples = 0;
 
     // create directory if it doesn't exist
     {
@@ -76,7 +106,10 @@ bool DataRecorder::startRecording(QString fileName, QString separator,
         }
         fileStream << channelNames.join(_sep);
         fileStream << le();
-        lastNumChannels = channelNames.length();
+
+        // the two marker columns are not data channels, otherwise every
+        // recording with markers would warn about a channel count change
+        lastNumChannels = channelNames.length() - ((markerProvider != nullptr) ? 2 : 0);
     }
     return true;
 }
@@ -107,8 +140,25 @@ void DataRecorder::feedIn(const SamplePack& data)
         for (unsigned ci = 0; ci < numChannels; ci++)
         {
             fileStream << data.data(ci)[i];
-            if (ci != numChannels-1) fileStream << _sep;
+            if (ci != numChannels-1 || markerProvider != nullptr) fileStream << _sep;
         }
+
+        if (markerProvider != nullptr)
+        {
+            const QString value = markerProvider->markerValue(markerBase + writtenSamples);
+
+            // first column: is there a marker on this sample
+            fileStream << (value.isEmpty() ? QLatin1Char('0') : QLatin1Char('1')) << _sep;
+
+            // second column: the value the tagging device actually sent,
+            // empty when the sample has no marker
+            if (!value.isEmpty())
+            {
+                fileStream << csvField(value, _sep);
+            }
+        }
+        writtenSamples++;
+
         fileStream << le();
     }
 

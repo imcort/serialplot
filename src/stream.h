@@ -30,6 +30,7 @@
 #include "channelinfomodel.h"
 #include "streamchannel.h"
 #include "framebuffer.h"
+#include "markerprovider.h"
 
 /**
  * Main waveform storage class. It consists of channels. Channels are
@@ -37,8 +38,14 @@
  *
  * Implements `Sink` class for data entry. It's expected to be
  * connected to a `Device` source.
+ *
+ * Also keeps the markers placed by an auxiliary input (see `MarkerPort`).
+ * A marker belongs to the next sample that is going to be received, and is
+ * stored as an absolute sample index so that it stays valid while the ring
+ * buffers rotate. Implements `MarkerProvider` so that the recorder can write
+ * them out.
  */
-class Stream : public QObject, public Sink
+class Stream : public QObject, public Sink, public MarkerProvider
 {
     Q_OBJECT
 
@@ -66,6 +73,37 @@ public:
     /// Load channel information
     void loadSettings(QSettings* settings);
 
+    // markers
+
+    /**
+     * Enables/disables the marker input. Markers are only accepted while
+     * enabled, markers that are already present are kept.
+     */
+    void setMarkersEnabled(bool enabled);
+    bool markersEnabled() const;
+
+    /**
+     * Places a marker carrying `value` on the next sample to be received.
+     *
+     * Because the marker always arrives *between* two sample batches, the
+     * first sample after the event is the closest one to the tag time that
+     * can still be stored in the recording.
+     *
+     * Does nothing when markers are disabled. Values that land on the same
+     * sample are concatenated, a sample carries a single marker.
+     */
+    void addMarker(QChar value);
+
+    /// Absolute index of the oldest sample that is still in the buffers
+    quint64 windowStart() const;
+
+    /// Markers that are currently inside the buffers, in ascending order
+    QVector<quint64> visibleMarkers() const;
+
+    // implementation of `MarkerProvider`
+    quint64 totalSamples() const override;
+    QString markerValue(quint64 sampleIndex) const override;
+
 protected:
     // implementations for `Sink`
     virtual void setNumChannels(unsigned nc, bool x);
@@ -77,6 +115,8 @@ signals:
     void channelAdded(const StreamChannel* chan);
     void channelNameChanged(unsigned channel, QString name); // TODO: does it stay?
     void dataAdded(); ///< emitted when data added to channel man.
+    /// Emitted when a marker is added or dropped from the buffers
+    void markersChanged();
     /**
      * Emitted when the X buffer object itself is replaced, i.e. when the
      * `XFrameBuffer` pointers returned by `StreamChannel::xData()` change.
@@ -112,6 +152,22 @@ private:
 
     bool xAsIndex;
     double xMin, xMax;
+
+    // markers
+
+    /// A marker placed on a sample. `index` is absolute.
+    struct Marker
+    {
+        quint64 index;
+        QString value;
+    };
+
+    bool _markersEnabled;
+    quint64 _totalSamples;         ///< number of samples fed so far
+    QVector<Marker> _markers;      ///< ascending by `index`
+
+    /// Drops markers that scrolled out of the buffers
+    void trimMarkers();
 
     /**
      * Applies gain and offset to given pack.

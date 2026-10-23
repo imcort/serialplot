@@ -281,3 +281,110 @@ TEST_CASE("changing X axis replaces the X buffer", "[memory, stream, x]")
     REQUIRE(newX->sample(0) == Approx(0.));
     REQUIRE(newX->sample(9) == Approx(100.));
 }
+
+TEST_CASE("markers carry the received value", "[stream, marker]")
+{
+    Stream s(1, false, 10);
+    s.setMarkersEnabled(true);
+
+    TestSource so(1, false);
+    so.connectSink(&s);
+
+    SamplePack pack(4, 1);
+    so._feed(pack); // samples 0..3
+
+    REQUIRE(s.totalSamples() == 4);
+    REQUIRE(s.visibleMarkers().isEmpty());
+
+    // the marker goes to the first sample that still has to be stored, the
+    // previous ones are already written to the recording by now
+    s.addMarker('A');
+    REQUIRE(s.visibleMarkers().size() == 1);
+    REQUIRE(s.visibleMarkers().first() == 4);
+    REQUIRE(s.markerValue(4) == "A");
+    REQUIRE(s.markerValue(3).isEmpty());
+
+    // several characters between two samples end up in the same cell
+    s.addMarker('B');
+    REQUIRE(s.visibleMarkers().size() == 1);
+    REQUIRE(s.markerValue(4) == "AB");
+
+    so._feed(pack); // samples 4..7
+    s.addMarker('7');
+    REQUIRE(s.visibleMarkers().size() == 2);
+    REQUIRE(s.visibleMarkers().last() == 8);
+    REQUIRE(s.markerValue(8) == "7");
+    REQUIRE(s.markerValue(5).isEmpty());
+}
+
+TEST_CASE("markers are ignored while disabled", "[stream, marker]")
+{
+    Stream s(1, false, 10);
+    TestSource so(1, false);
+    so.connectSink(&s);
+
+    SamplePack pack(4, 1);
+    so._feed(pack);
+
+    s.addMarker('A'); // disabled by default
+    REQUIRE(s.visibleMarkers().isEmpty());
+
+    s.setMarkersEnabled(true);
+    s.addMarker('B');
+    REQUIRE(s.visibleMarkers().size() == 1);
+    REQUIRE(s.markerValue(4) == "B");
+
+    s.setMarkersEnabled(false);
+    s.addMarker('C');
+    REQUIRE(s.visibleMarkers().size() == 1);
+    REQUIRE(s.markerValue(4) == "B");
+
+    // already placed markers survive, they are data
+    so._feed(pack);
+    REQUIRE(s.visibleMarkers().size() == 1);
+}
+
+TEST_CASE("markers scroll out with the sample window", "[stream, marker]")
+{
+    Stream s(1, false, 10);
+    s.setMarkersEnabled(true);
+
+    TestSource so(1, false);
+    so.connectSink(&s);
+
+    SamplePack pack(4, 1);
+    so._feed(pack);      // 0..3
+    s.addMarker('X');    // marker at 4
+    REQUIRE(s.visibleMarkers().size() == 1);
+
+    so._feed(pack);      // 4..7   window starts at 0
+    so._feed(pack);      // 8..11  window starts at 2
+    REQUIRE(s.windowStart() == 2);
+    REQUIRE(s.visibleMarkers().size() == 1);
+    REQUIRE(s.markerValue(4) == "X");
+
+    so._feed(pack);      // 12..15 window starts at 6, marker at 4 is gone
+    REQUIRE(s.windowStart() == 6);
+    REQUIRE(s.visibleMarkers().isEmpty());
+    REQUIRE(s.markerValue(4).isEmpty());
+}
+
+TEST_CASE("clear drops the markers", "[stream, marker]")
+{
+    Stream s(1, false, 10);
+    s.setMarkersEnabled(true);
+
+    TestSource so(1, false);
+    so.connectSink(&s);
+
+    SamplePack pack(4, 1);
+    so._feed(pack);
+    s.addMarker('A');
+    REQUIRE(s.visibleMarkers().size() == 1);
+
+    QSignalSpy spy(&s, SIGNAL(markersChanged()));
+    s.clear();
+    REQUIRE(s.visibleMarkers().isEmpty());
+    REQUIRE(s.markerValue(4).isEmpty());
+    REQUIRE(spy.count() == 1);
+}

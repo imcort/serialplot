@@ -33,6 +33,7 @@
 #include <qwt_plot_curve.h>
 #include "plot.h"
 #include "framebufferseries.h"
+#include "markerplotitem.h"
 #include "stream.h"
 #include "snapshot.h"
 #include "plotmenu.h"
@@ -95,6 +96,7 @@ private:
     QScrollArea* scrollArea;
     QList<QwtPlotCurve*> curves;
     QList<Plot*> plotWidgets;
+    QList<MarkerPlotItem*> markerItems;  ///< one per plot widget, draws the markers
     Plot* emptyPlot;  ///< for displaying when all channels are hidden
     const Stream* _stream;       ///< attached stream, can be `nullptr`
     const ChannelInfoModel* infoModel;
@@ -129,6 +131,8 @@ private:
     void _addCurve(QwtPlotCurve* curve);
     /// Check and make sure "no visible channels" text is shown
     void checkNoVisChannels();
+    /// Detaches and deletes the marker items of the current plot widgets
+    void deleteMarkerItems();
 
 private slots:
     void showGrid(bool show = true);

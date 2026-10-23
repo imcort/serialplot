@@ -50,6 +50,7 @@
 #include "datatextview.h"
 #include "bpslabel.h"
 #include "blegattdevice.h"
+#include "markerport.h"
 
 namespace Ui {
 class MainWindow;
@@ -75,6 +76,8 @@ private:
 
     QSerialPort serialPort;
     BleGattDevice bleDevice;
+    QSerialPort markerSerialPort;   ///< auxiliary input for the tagger device
+    MarkerPort markerPort;
     PortControl portControl;
 
     unsigned int numOfSamples;

@@ -68,6 +68,7 @@ qt_add_executable(TestReaders EXCLUDE_FROM_ALL
   ../src/endiannessbox.cpp
   ../src/numberformatbox.cpp
   ../src/numberformat.cpp
+  ../src/markerport.cpp
   ${UI_FILES_T}
   )
 target_link_libraries(TestReaders PRIVATE Qt6::Widgets Qt6::Test)

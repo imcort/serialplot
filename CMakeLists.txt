@@ -107,6 +107,8 @@ qt_add_executable(${PROGRAM_NAME} WIN32
   src/numberformat.cpp
   src/updatechecker.cpp
   src/blegattdevice.cpp
+  src/markerport.cpp
+  src/markerplotitem.cpp
   src/versionnumber.cpp
   src/updatecheckdialog.cpp
   src/samplepack.cpp

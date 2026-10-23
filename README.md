@@ -12,6 +12,9 @@ Small and simple software for plotting data from serial port in realtime.
 * ASCII input (Comma Separated Values)
 * Synchronized multi channel plotting
 * Define and send commands to the device in ASCII or binary format
+* Auxiliary marker input: every character received on a second serial port is
+  drawn as a vertical line and recorded in the CSV (a marker flag plus the
+  received character)
 * Take snapshots of the current waveform and save to CSV file
 
 See

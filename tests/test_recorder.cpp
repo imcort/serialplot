@@ -21,6 +21,7 @@
 #include "catch.hpp"
 
 #include <QDir>
+#include <QMap>
 #include "datarecorder.h"
 #include "test_helpers.h"
 
@@ -108,4 +109,157 @@ TEST_CASE("test recording multiple channels", "[recorder]")
 
     // cleanup
     if (QFile::exists(fileName)) QFile::remove(fileName);
+}
+
+/// Fake marker source so that the recorder can be tested without a `Stream`
+class FakeMarkers : public MarkerProvider
+{
+public:
+    quint64 total = 0;
+    QMap<quint64, QString> marks;
+
+    quint64 totalSamples() const override { return total; }
+    QString markerValue(quint64 sampleIndex) const override { return marks.value(sampleIndex); }
+};
+
+TEST_CASE("recording writes the received marker values", "[recorder, marker]")
+{
+    const auto fileName = QDir::tempPath() + QString("/sp_test_markers.csv");
+    if (QFile::exists(fileName)) QFile::remove(fileName);
+
+    FakeMarkers markers;
+    markers.total = 0;
+    markers.marks.insert(1, "A");
+    markers.marks.insert(3, "9");
+
+    DataRecorder rec;
+    rec.setMarkerProvider(&markers);
+    rec.setDecimals(0);
+
+    TestSource source(1, false);
+    source.connectSink(&rec);
+
+    SamplePack samples(5, 1);
+    for (int i = 0; i < 5; i++)
+    {
+        samples.data(0)[i] = i + 1;
+    }
+
+    REQUIRE(rec.startRecording(fileName, ",", {"Channel 1", "Marker", "Marker Value"},
+                               DataRecorder::TimestampOption::disabled));
+    source._feed(samples);
+    rec.stopRecording();
+
+    QFile recordFile(fileName);
+    REQUIRE(recordFile.open(QIODevice::ReadOnly | QIODevice::Text));
+
+    REQUIRE((recordFile.readLine() == "Channel 1,Marker,Marker Value\n"));
+    // first marker column tells whether the sample is marked, the second one
+    // carries the value that the tagging device sent (empty otherwise)
+    REQUIRE((recordFile.readLine() == "1,0,\n"));
+    REQUIRE((recordFile.readLine() == "2,1,A\n"));
+    REQUIRE((recordFile.readLine() == "3,0,\n"));
+    REQUIRE((recordFile.readLine() == "4,1,9\n"));
+    REQUIRE((recordFile.readLine() == "5,0,\n"));
+}
+
+TEST_CASE("recording starts at the current sample index", "[recorder, marker]")
+{
+    const auto fileName = QDir::tempPath() + QString("/sp_test_markers_offset.csv");
+    if (QFile::exists(fileName)) QFile::remove(fileName);
+
+    // the stream already delivered 100 samples before the recording starts
+    FakeMarkers markers;
+    markers.total = 100;
+    markers.marks.insert(101, "B");
+
+    DataRecorder rec;
+    rec.setMarkerProvider(&markers);
+    rec.setDecimals(0);
+
+    TestSource source(1, false);
+    source.connectSink(&rec);
+
+    SamplePack samples(3, 1);
+    samples.data(0)[0] = 1;
+    samples.data(0)[1] = 2;
+    samples.data(0)[2] = 3;
+
+    REQUIRE(rec.startRecording(fileName, ",", {"Channel 1", "Marker", "Marker Value"},
+                               DataRecorder::TimestampOption::disabled));
+    source._feed(samples);
+    rec.stopRecording();
+
+    QFile recordFile(fileName);
+    REQUIRE(recordFile.open(QIODevice::ReadOnly | QIODevice::Text));
+
+    REQUIRE((recordFile.readLine() == "Channel 1,Marker,Marker Value\n"));
+    REQUIRE((recordFile.readLine() == "1,0,\n"));     // index 100
+    REQUIRE((recordFile.readLine() == "2,1,B\n"));     // index 101, marked
+    REQUIRE((recordFile.readLine() == "3,0,\n"));     // index 102
+}
+
+TEST_CASE("recording without a marker provider has no extra column", "[recorder, marker]")
+{
+    const auto fileName = QDir::tempPath() + QString("/sp_test_no_markers.csv");
+    if (QFile::exists(fileName)) QFile::remove(fileName);
+
+    DataRecorder rec;
+    rec.setDecimals(0);
+
+    TestSource source(1, false);
+    source.connectSink(&rec);
+
+    SamplePack samples(2, 1);
+    samples.data(0)[0] = 7;
+    samples.data(0)[1] = 8;
+
+    REQUIRE(rec.startRecording(fileName, ",", {"Channel 1"},
+                               DataRecorder::TimestampOption::disabled));
+    source._feed(samples);
+    rec.stopRecording();
+
+    QFile recordFile(fileName);
+    REQUIRE(recordFile.open(QIODevice::ReadOnly | QIODevice::Text));
+
+    REQUIRE((recordFile.readLine() == "Channel 1\n"));
+    REQUIRE((recordFile.readLine() == "7\n"));
+    REQUIRE((recordFile.readLine() == "8\n"));
+}
+
+TEST_CASE("marker values that break the CSV are quoted", "[recorder, marker]")
+{
+    const auto fileName = QDir::tempPath() + QString("/sp_test_markers_quoted.csv");
+    if (QFile::exists(fileName)) QFile::remove(fileName);
+
+    FakeMarkers markers;
+    markers.marks.insert(0, ",");   // the separator itself
+    markers.marks.insert(1, " ");   // a lone space
+    markers.marks.insert(2, "\"");  // a quote
+
+    DataRecorder rec;
+    rec.setMarkerProvider(&markers);
+    rec.setDecimals(0);
+
+    TestSource source(1, false);
+    source.connectSink(&rec);
+
+    SamplePack samples(3, 1);
+    for (int i = 0; i < 3; i++)
+    {
+        samples.data(0)[i] = i + 1;
+    }
+
+    REQUIRE(rec.startRecording(fileName, ",", {"Channel 1", "Marker", "Marker Value"},
+                               DataRecorder::TimestampOption::disabled));
+    source._feed(samples);
+    rec.stopRecording();
+
+    QFile recordFile(fileName);
+    REQUIRE(recordFile.open(QIODevice::ReadOnly | QIODevice::Text));
+
+    REQUIRE((recordFile.readLine() == "Channel 1,Marker,Marker Value\n"));
+    REQUIRE((recordFile.readLine() == "1,1,\",\"\n"));
+    REQUIRE((recordFile.readLine() == "2,1,\" \"\n"));
+    REQUIRE((recordFile.readLine() == "3,1,\"\"\"\"\n"));
 }

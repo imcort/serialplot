@@ -25,6 +25,7 @@
 #include <QTextStream>
 
 #include "sink.h"
+#include "markerprovider.h"
 
 /**
  * Implemented as a `Sink` that writes incoming data to a file. Before
@@ -58,6 +59,19 @@ public:
      * Set floating point number precision.
      */
     void setDecimals(unsigned decimals);
+
+    /**
+     * Enables the marker column.
+     *
+     * When a provider is set every written row gets two more columns after the
+     * channels: one holding `1` when the sample has a marker and `0` otherwise,
+     * and one holding the value that the tagging device sent (empty when there
+     * is no marker). The header line is *not* extended, callers must add the
+     * two column names themselves (see `RecordPanel`).
+     *
+     * @param provider source of the markers, may be `nullptr` to disable
+     */
+    void setMarkerProvider(const MarkerProvider* provider);
 
     /**
      * @brief Starts recording data to a file in CSV format.
@@ -105,6 +119,9 @@ private:
     QTextStream fileStream;
     QString _sep;
     TimestampOption timestampOpt;
+    const MarkerProvider* markerProvider;
+    quint64 markerBase;      ///< absolute index of the first recorded sample
+    quint64 writtenSamples;  ///< number of rows written so far
 
     /// Returns formatted timestamp
     QString formatTimestamp() const;

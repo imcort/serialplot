@@ -17,6 +17,8 @@
   along with serialplot.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <algorithm>
+
 #include "stream.h"
 #include "ringbuffer.h"
 #include "indexbuffer.h"
@@ -27,6 +29,9 @@ Stream::Stream(unsigned nc, bool x, unsigned ns) :
 {
     _numSamples = ns;
     _paused = false;
+
+    _markersEnabled = false;
+    _totalSamples = 0;
 
     xAsIndex = true;
     xMin = 0;
@@ -227,6 +232,12 @@ void Stream::feedIn(const SamplePack& pack)
     if (_paused) return;
 
     unsigned ns = pack.numSamples();
+
+    // samples are numbered from the moment the stream was created, markers
+    // are stored against these absolute indexes
+    _totalSamples += ns;
+    trimMarkers();
+
     if (_hasx)
     {
         // TODO: implement XRingBuffer (binary search)
@@ -263,6 +274,12 @@ void Stream::clear()
     {
         static_cast<RingBuffer*>(c->yData())->clear();
     }
+
+    if (!_markers.isEmpty())
+    {
+        _markers.clear();
+        emit markersChanged();
+    }
 }
 
 void Stream::setNumSamples(unsigned value)
@@ -274,6 +291,105 @@ void Stream::setNumSamples(unsigned value)
     for (auto c : channels)
     {
         static_cast<RingBuffer*>(c->yData())->resize(value);
+    }
+
+    // a smaller buffer may have dropped the samples that the markers point to
+    trimMarkers();
+}
+
+void Stream::setMarkersEnabled(bool enabled)
+{
+    _markersEnabled = enabled;
+}
+
+bool Stream::markersEnabled() const
+{
+    return _markersEnabled;
+}
+
+void Stream::addMarker(QChar value)
+{
+    if (!_markersEnabled) return;
+
+    // Attach the marker to the *next* sample, not to the last one that was
+    // already delivered: a marker arrives between two batches, and by the time
+    // it arrives the previous samples have been stored and, if recording, also
+    // written to the file. Using the next index keeps the plot and the
+    // recording consistent, the line simply appears at the first sample that
+    // follows the tag event.
+    const quint64 index = _totalSamples;
+    const QString text(value);
+
+    // several characters can arrive between two samples, a sample can only
+    // hold one marker so keep all of them in the same cell
+    if (!_markers.isEmpty() && _markers.last().index == index)
+    {
+        _markers.last().value.append(text);
+        emit markersChanged();
+        return;
+    }
+
+    _markers.append({index, text});
+    trimMarkers();
+    emit markersChanged();
+}
+
+quint64 Stream::windowStart() const
+{
+    return _totalSamples > _numSamples ? _totalSamples - _numSamples : 0;
+}
+
+QVector<quint64> Stream::visibleMarkers() const
+{
+    const quint64 start = windowStart();
+    QVector<quint64> visible;
+
+    // `_markers` is sorted, skip the part that scrolled out
+    auto it = std::lower_bound(_markers.cbegin(), _markers.cend(), start,
+                               [](const Marker& m, quint64 index)
+                               {
+                                   return m.index < index;
+                               });
+    for (; it != _markers.cend(); ++it)
+    {
+        visible.append(it->index);
+    }
+    return visible;
+}
+
+quint64 Stream::totalSamples() const
+{
+    return _totalSamples;
+}
+
+QString Stream::markerValue(quint64 sampleIndex) const
+{
+    auto it = std::lower_bound(_markers.cbegin(), _markers.cend(), sampleIndex,
+                               [](const Marker& m, quint64 index)
+                               {
+                                   return m.index < index;
+                               });
+
+    if (it != _markers.cend() && it->index == sampleIndex)
+    {
+        return it->value;
+    }
+    return QString();
+}
+
+void Stream::trimMarkers()
+{
+    const quint64 start = windowStart();
+
+    int drop = 0;
+    while (drop < _markers.size() && _markers[drop].index < start)
+    {
+        drop++;
+    }
+
+    if (drop > 0)
+    {
+        _markers.remove(0, drop);
     }
 }
 
