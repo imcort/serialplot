@@ -20,6 +20,11 @@
 #define CATCH_CONFIG_MAIN  // This tells Catch to provide a main() - only do this in one cpp file
 #include "catch.hpp"
 
+#include <QSettings>
+#include <QDir>
+#include <QFile>
+
+#include "channelinfomodel.h"
 #include "samplepack.h"
 #include "source.h"
 #include "indexbuffer.h"
@@ -389,4 +394,41 @@ TEST_CASE("ReadOnlyBuffer sliced constructor", "[memory, buffer]")
     {
         REQUIRE(buf.sample(i) == (i + 5));
     }
+}
+
+TEST_CASE("channel info settings round trip", "[settings]")
+{
+    const auto fileName = QDir::tempPath() + QString("/sp_test_channels.ini");
+    if (QFile::exists(fileName)) QFile::remove(fileName);
+
+    ChannelInfoModel saved(3);
+    saved.setData(saved.index(0, ChannelInfoModel::COLUMN_NAME), "alpha", Qt::EditRole);
+    saved.setData(saved.index(1, ChannelInfoModel::COLUMN_NAME), "beta", Qt::EditRole);
+    saved.setData(saved.index(1, ChannelInfoModel::COLUMN_VISIBILITY), false, Qt::CheckStateRole);
+    saved.setData(saved.index(2, ChannelInfoModel::COLUMN_GAIN), 2.5, Qt::EditRole);
+    saved.setData(saved.index(2, ChannelInfoModel::COLUMN_GAIN), Qt::Checked, Qt::CheckStateRole);
+    saved.setData(saved.index(2, ChannelInfoModel::COLUMN_OFFSET), -3.0, Qt::EditRole);
+    saved.setData(saved.index(2, ChannelInfoModel::COLUMN_OFFSET), Qt::Checked, Qt::CheckStateRole);
+
+    {
+        QSettings settings(fileName, QSettings::IniFormat);
+        saved.saveSettings(&settings);
+        settings.sync();
+    }
+
+    ChannelInfoModel loaded(3);
+    {
+        QSettings settings(fileName, QSettings::IniFormat);
+        loaded.loadSettings(&settings);
+    }
+
+    REQUIRE(loaded.name(0) == "alpha");
+    REQUIRE(loaded.name(1) == "beta");
+    REQUIRE(loaded.name(2) == "Channel 3");
+    REQUIRE(loaded.isVisible(1) == false);
+    REQUIRE(loaded.isVisible(0) == true);
+    REQUIRE(loaded.gain(2) == Approx(2.5));
+    REQUIRE(loaded.gainEn(2) == true);
+    REQUIRE(loaded.offset(2) == Approx(-3.0));
+    REQUIRE(loaded.offsetEn(2) == true);
 }

@@ -23,6 +23,11 @@
 #include <QApplication>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QUrl>
+#include <QDir>
 #include <QFile>
 #include <QTextStream>
 #include <QMenu>
@@ -78,6 +83,9 @@ MainWindow::MainWindow(QWidget *parent) :
     bpsLabel(&portControl, &dataFormatPanel, this)
 {
     ui->setupUi(this);
+
+    // configuration files can be dropped onto the window
+    setAcceptDrops(true);
 
     plotMan = new PlotManager(ui->plotArea, &plotMenu, &stream);
 
@@ -607,6 +615,8 @@ void MainWindow::saveMWSettings(QSettings* settings)
                        bool(windowState() & Qt::WindowMaximized));
     // save toolbar/dockwidgets state
     settings->setValue(SG_MainWindow_State, saveState());
+    // directory of the last configuration file
+    settings->setValue(SG_MainWindow_ConfigDir, configDir);
     settings->endGroup();
 }
 
@@ -638,30 +648,139 @@ void MainWindow::loadMWSettings(QSettings* settings)
     restoreState(settings->value(SG_MainWindow_State).toByteArray());
     settings->setValue(SG_MainWindow_State, saveState());
 
+    // directory of the last configuration file
+    configDir = settings->value(SG_MainWindow_ConfigDir, QString()).toString();
+
     settings->endGroup();
+}
+
+QString MainWindow::configFileStartPath(const QString& fileName) const
+{
+    const QString dir = configDir.isEmpty() ? QDir::homePath() : configDir;
+    return QDir(dir).filePath(fileName);
+}
+
+bool MainWindow::applyConfiguration(const QString& fileName)
+{
+    QFileInfo info(fileName);
+    if (!info.exists() || !info.isFile())
+    {
+        qCritical() << "Configuration file not found:" << fileName;
+        return false;
+    }
+
+    QSettings settings(fileName, QSettings::IniFormat);
+    if (settings.status() != QSettings::NoError)
+    {
+        qCritical() << "Failed to read configuration file:" << fileName;
+        return false;
+    }
+
+    configDir = info.absolutePath();
+    loadAllSettings(&settings);
+    return true;
+}
+
+bool MainWindow::loadConfiguration(const QString& fileName)
+{
+    // No dialog here: this is also called from the command line and from the
+    // OS file-open event. Callers that have a UI (the menu action) report the
+    // failure themselves.
+    if (!applyConfiguration(fileName))
+    {
+        return false;
+    }
+
+    // values that did not change emit nothing, redraw once anyway
+    plotMan->replot();
+    statusBar()->showMessage(tr("Configuration loaded from %1").arg(fileName), 5000);
+    return true;
+}
+
+bool MainWindow::saveConfiguration(const QString& fileName)
+{
+    QSettings settings(fileName, QSettings::IniFormat);
+    saveAllSettings(&settings);
+    settings.sync();
+
+    if (settings.status() != QSettings::NoError)
+    {
+        qCritical() << "Failed to write configuration file:" << fileName;
+        return false;
+    }
+
+    configDir = QFileInfo(fileName).absolutePath();
+    return true;
 }
 
 void MainWindow::onSaveSettings()
 {
     QString fileName = QFileDialog::getSaveFileName(
-        this, tr("Save Settings"), QString(), "INI (*.ini)");
+        this, tr("Save Configuration"),
+        configFileStartPath("serialplot.ini"),
+        tr("Configuration files (*.ini);;All files (*)"));
 
-    if (!fileName.isNull()) // user canceled
+    if (fileName.isEmpty()) // user canceled
     {
-        QSettings settings(fileName, QSettings::IniFormat);
-        saveAllSettings(&settings);
+        return;
+    }
+
+    if (saveConfiguration(fileName))
+    {
+        statusBar()->showMessage(tr("Configuration saved to %1").arg(fileName), 5000);
+    }
+    else
+    {
+        QMessageBox::warning(this, tr("Save Configuration"),
+                             tr("Could not save the configuration file:\n%1")
+                             .arg(fileName));
     }
 }
 
 void MainWindow::onLoadSettings()
 {
     QString fileName = QFileDialog::getOpenFileName(
-        this, tr("Load Settings"), QString(), "INI (*.ini)");
+        this, tr("Open Configuration"),
+        configFileStartPath(QString()),
+        tr("Configuration files (*.ini);;All files (*)"));
 
-    if (!fileName.isNull()) // user canceled
+    if (fileName.isEmpty()) // user canceled
     {
-        QSettings settings(fileName, QSettings::IniFormat);
-        loadAllSettings(&settings);
+        return;
+    }
+
+    if (!loadConfiguration(fileName))
+    {
+        QMessageBox::warning(this, tr("Open Configuration"),
+                             tr("Could not load the configuration file:\n%1")
+                             .arg(fileName));
+    }
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* event)
+{
+    if (!event->mimeData()->hasUrls()) return;
+
+    for (const QUrl& url : event->mimeData()->urls())
+    {
+        if (url.isLocalFile() && url.toLocalFile().endsWith(".ini", Qt::CaseInsensitive))
+        {
+            event->acceptProposedAction();
+            return;
+        }
+    }
+}
+
+void MainWindow::dropEvent(QDropEvent* event)
+{
+    for (const QUrl& url : event->mimeData()->urls())
+    {
+        if (url.isLocalFile() && url.toLocalFile().endsWith(".ini", Qt::CaseInsensitive))
+        {
+            loadConfiguration(url.toLocalFile());
+            event->acceptProposedAction();
+            return;
+        }
     }
 }
 
@@ -683,21 +802,29 @@ void MainWindow::handleCommandLineOptions(const QCoreApplication &app)
     parser.addOption(baudrateOpt);
     parser.addOption(openPortOpt);
 
+    parser.addPositionalArgument("config",
+                                 "Configuration file to load (same as --config).",
+                                 "[config]");
+
     parser.process(app);
 
+    // the configuration file can be given with `-c` or simply as the first
+    // argument, so that the file can be opened with the application directly
+    QString configFile;
     if (parser.isSet(configOpt))
     {
-        QString fileName = parser.value(configOpt);
-        QFileInfo fileInfo(fileName);
+        configFile = parser.value(configOpt);
+    }
+    else if (!parser.positionalArguments().isEmpty())
+    {
+        configFile = parser.positionalArguments().first();
+    }
 
-        if (fileInfo.exists() && fileInfo.isFile())
+    if (!configFile.isEmpty())
+    {
+        if (!applyConfiguration(configFile))
         {
-            QSettings settings(fileName, QSettings::IniFormat);
-            loadAllSettings(&settings);
-        }
-        else
-        {
-            qCritical() << "Configuration file not exist. Closing application.";
+            qCritical() << "Configuration file not found or not readable. Closing application.";
             std::exit(1);
         }
     }

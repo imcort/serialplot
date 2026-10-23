@@ -140,7 +140,8 @@ void CommandPanel::loadSettings(QSettings* settings)
     while (commands.size())
     {
         auto command = commands.takeLast();
-        command->disconnect();
+        // deleting the widget disconnects everything, calling disconnect()
+        // here would also disconnect the `destroyed` signal and makes Qt warn
         delete command;
     }
 

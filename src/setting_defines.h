@@ -40,6 +40,7 @@ const char SG_MainWindow_ActivePanel[] = "activePanel";
 const char SG_MainWindow_HidePanels[] = "hidePanels";
 const char SG_MainWindow_Maximized[] = "maximized";
 const char SG_MainWindow_State[] = "state";
+const char SG_MainWindow_ConfigDir[] = "configDir";
 
 // port setting keys
 const char SG_Port_SelectedPort[] = "selectedPort";

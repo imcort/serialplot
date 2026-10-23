@@ -33,6 +33,7 @@
 #include <QColor>
 #include <QtGlobal>
 #include <QSettings>
+#include <QString>
 #include <qwt_plot_curve.h>
 
 #include "portcontrol.h"
@@ -52,6 +53,9 @@
 #include "blegattdevice.h"
 #include "markerport.h"
 
+class QDragEnterEvent;
+class QDropEvent;
+
 namespace Ui {
 class MainWindow;
 }
@@ -67,6 +71,21 @@ public:
     PlotViewSettings viewSettings() const;
 
     void messageHandler(QtMsgType type, const QString &logString, const QString &msg);
+
+    /**
+     * Applies all settings (Port, Data Format, Plot, Commands, Record...) from
+     * a configuration file.
+     *
+     * @return false when the file doesn't exist or cannot be parsed
+     */
+    bool loadConfiguration(const QString& fileName);
+
+    /**
+     * Writes all current settings into a configuration file.
+     *
+     * @return false when the file cannot be written
+     */
+    bool saveConfiguration(const QString& fileName);
 
 private:
     Ui::MainWindow *ui;
@@ -100,7 +119,21 @@ private:
     UpdateCheckDialog updateCheckDialog;
     BPSLabel bpsLabel;
 
+    /// Directory of the last used configuration file
+    QString configDir;
+
     void handleCommandLineOptions(const QCoreApplication &app);
+
+    /// Implementation of `loadConfiguration`, without UI feedback
+    bool applyConfiguration(const QString& fileName);
+
+    /// Returns the path to start the configuration file dialogs with
+    QString configFileStartPath(const QString& fileName) const;
+
+    /// `QWidget::dragEnterEvent` handler, accepts configuration files
+    void dragEnterEvent(QDragEnterEvent* event);
+    /// `QWidget::dropEvent` handler, loads a dropped configuration file
+    void dropEvent(QDropEvent* event);
 
     /// Returns true if demo is running
     bool isDemoRunning();

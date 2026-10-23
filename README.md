@@ -15,6 +15,9 @@ Small and simple software for plotting data from serial port in realtime.
 * Auxiliary marker input: every character received on a second serial port is
   drawn as a vertical line and recorded in the CSV (a marker flag plus the
   received character)
+* Every setting (port, data format, plot, commands, record) can be saved to a
+  configuration file and loaded back, from the menu, the command line or by
+  dropping the file onto the window
 * Take snapshots of the current waveform and save to CSV file
 
 See

@@ -20,6 +20,22 @@
     <string>${PROJECT_VERSION}</string>
     <key>CFBundleVersion</key>
     <string>${PROJECT_VERSION}</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>SerialPlot Configuration</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>ini</string>
+            </array>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <!-- Alternate: only offered in "Open With", never hijacks .ini files -->
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+        </dict>
+    </array>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>SerialPlot uses Bluetooth to scan and connect to BLE devices for plotting data.</string>
     <key>NSBluetoothPeripheralUsageDescription</key>

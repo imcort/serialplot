@@ -226,18 +226,18 @@
   </action>
   <action name="actionSaveSettings">
    <property name="text">
-    <string>&amp;Save Settings</string>
+    <string>&amp;Save Configuration...</string>
    </property>
    <property name="toolTip">
-    <string>Save Settings to a File</string>
+    <string>Save all settings (port, data format, plot, commands, record) to a file</string>
    </property>
   </action>
   <action name="actionLoadSettings">
    <property name="text">
-    <string>&amp;Load Settings</string>
+    <string>&amp;Open Configuration...</string>
    </property>
    <property name="toolTip">
-    <string>Load Settings from a File</string>
+    <string>Load all settings from a configuration file</string>
    </property>
   </action>
   <action name="actionCheckUpdate">

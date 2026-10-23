@@ -18,6 +18,7 @@
 */
 
 #include <QApplication>
+#include <QFileOpenEvent>
 #include <QtGlobal>
 #include <QIcon>
 #include <QCoreApplication>
@@ -31,6 +32,53 @@
 
 MainWindow* pMainWindow = nullptr;
 
+/**
+ * Application object that forwards files opened by the OS (double click,
+ * "Open With", drag onto the dock icon) to the main window.
+ *
+ * No signal is used here on purpose: a file can be requested before the
+ * window exists, in that case it is kept and picked up after construction.
+ */
+class SerialPlotApplication : public QApplication
+{
+public:
+    SerialPlotApplication(int& argc, char** argv) :
+        QApplication(argc, argv),
+        _window(nullptr) {}
+
+    /// Window that receives the files, may be `nullptr`
+    void setMainWindow(MainWindow* window) { _window = window; }
+
+    /// File that was requested before a window was set
+    const QString& pendingFile() const { return _pendingFile; }
+
+protected:
+    bool event(QEvent* event) override
+    {
+        if (event->type() == QEvent::FileOpen)
+        {
+            const QString file = static_cast<QFileOpenEvent*>(event)->file();
+            if (!file.isEmpty())
+            {
+                if (_window != nullptr)
+                {
+                    _window->loadConfiguration(file);
+                }
+                else
+                {
+                    _pendingFile = file;
+                }
+            }
+            return true;
+        }
+
+        return QApplication::event(event);
+    }
+
+private:
+    MainWindow* _window;
+    QString _pendingFile;
+};
 void messageHandler(QtMsgType type, const QMessageLogContext &context,
                     const QString &msg)
 {
@@ -73,7 +121,7 @@ void messageHandler(QtMsgType type, const QMessageLogContext &context,
 
 int main(int argc, char *argv[])
 {
-    QApplication a(argc, argv);
+    SerialPlotApplication a(argc, argv);
     QApplication::setApplicationName(PROGRAM_NAME);
     QApplication::setApplicationVersion(VERSION_STRING);
 
@@ -96,6 +144,14 @@ int main(int argc, char *argv[])
     qInstallMessageHandler(messageHandler);
     MainWindow w;
     pMainWindow = &w;
+
+    // files opened by the OS (or dropped on the dock icon) are treated as
+    // configuration files
+    a.setMainWindow(&w);
+    if (!a.pendingFile().isEmpty())
+    {
+        w.loadConfiguration(a.pendingFile());
+    }
 
     ToolTipFilter ttf;
     a.installEventFilter(&ttf);
