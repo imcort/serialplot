@@ -103,7 +103,12 @@ if(QWT_VERSION)
 endif(QWT_VERSION)
 
 # is Qwt library static
-if (QWT_LIBRARY MATCHES "libqwt.a")
+# On Windows the MSVC static library is named qwt.lib (not libqwt.a) and
+# GET_PREREQUISITES below cannot inspect a static library to see which Qt it
+# was built against, so accept it as-is. Shared Qwt builds also produce
+# qwt.lib (the import library); in that case bin/qwt.dll has to be deployed
+# along with the executable.
+if (QWT_LIBRARY MATCHES "libqwt\\.a" OR (WIN32 AND QWT_LIBRARY MATCHES "qwt\\.lib"))
   set(qwt_is_static TRUE)
 else()
   set(qwt_is_static FALSE)

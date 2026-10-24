@@ -145,7 +145,15 @@ if (BUILD_QWT)
 endif ()
 
 # set compiler flags
-add_compile_options(-Wall)
+if (MSVC)
+  # /W3 is the default warning level, while /Wall is extremely noisy with the
+  # Qt headers. The sources are UTF-8 without a BOM, so /utf-8 is required,
+  # otherwise MSVC decodes them with the system code page and mangles
+  # non-ASCII string literals.
+  add_compile_options(/W3 /utf-8)
+else ()
+  add_compile_options(-Wall)
+endif ()
 
 # get the revision number as 'shorthash+' from git
 include(GetGitRevisionDescription)
@@ -175,6 +183,12 @@ add_custom_target(run
 
 # installing
 install(TARGETS ${PROGRAM_NAME} DESTINATION bin)
+
+# windeployqt only knows about Qt's own libraries, a shared Qwt build needs to
+# be installed explicitly (Windows/MSVC static builds do not produce bin/qwt.dll)
+if (WIN32 AND EXISTS "${QWT_ROOT}/bin/qwt.dll")
+  install(FILES "${QWT_ROOT}/bin/qwt.dll" DESTINATION bin)
+endif()
 
 # on windows use windeployqt to collect qt dependencies
 if (WIN32)
