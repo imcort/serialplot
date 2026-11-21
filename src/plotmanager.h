@@ -79,6 +79,8 @@ public slots:
     void setYAxis(bool autoScaled, double yMin = 0, double yMax = 1);
     /// Set the X axis
     void setXAxis(bool asIndex, double xMin = 0 , double xMax = 1);
+    /// Label the X axis as time (or clear the label)
+    void setTimeAxis(bool asTime);
     /// Display an animation for snapshot
     void flashSnapshotOverlay();
     /// Should be called to update zoom base
@@ -105,6 +107,7 @@ private:
     double _yMin;
     double _yMax;
     bool _xAxisAsIndex;
+    bool _xAxisAsTime;
     double _xMin;
     double _xMax;
     unsigned _numOfSamples;

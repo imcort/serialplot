@@ -131,6 +131,12 @@ void Plot::setXAxis(double xMin, double xMax)
     onXScaleChanged();
 }
 
+void Plot::setXAxisTitle(const QString& title)
+{
+    setAxisTitle(QwtPlot::xBottom, title);
+    replot();
+}
+
 void Plot::resetAxes()
 {
     // reset y axis

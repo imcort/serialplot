@@ -216,6 +216,9 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(&plotControlPanel, &PlotControlPanel::xScaleChanged,
             plotMan, &PlotManager::setXAxis);
 
+    connect(&plotControlPanel, &PlotControlPanel::timeAxisChanged,
+            plotMan, &PlotManager::setTimeAxis);
+
     connect(&plotControlPanel, &PlotControlPanel::plotWidthChanged,
             plotMan, &PlotManager::setPlotWidth);
 

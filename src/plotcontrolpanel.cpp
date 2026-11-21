@@ -20,8 +20,13 @@
 #include <QVariant>
 #include <QMessageBox>
 #include <QCheckBox>
+#include <QSignalBlocker>
 #include <QStyledItemDelegate>
 #include <QColorDialog>
+#include <QPainter>
+#include <QPainterPath>
+#include <QMouseEvent>
+#include <QApplication>
 
 #include <math.h>
 
@@ -43,10 +48,15 @@ struct Range
 
 Q_DECLARE_METATYPE(Range);
 
-/// Used for customizing double precision in tables
-class SpinBoxDelegate : public QStyledItemDelegate
+/// Used for the channel info table. Besides customizing double precision,
+/// draws the check indicators itself: some platform styles (for example the
+/// macOS style) no longer paint item-view check indicators, which makes the
+/// Visible/Gain/Offset checkboxes disappear.
+class ChannelInfoDelegate : public QStyledItemDelegate
 {
 public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
     QWidget* createEditor(QWidget *parent, const QStyleOptionViewItem &option,
                           const QModelIndex &index) const Q_DECL_OVERRIDE
         {
@@ -60,7 +70,138 @@ public:
             }
             return w;
         }
+
+    void paint(QPainter* painter, const QStyleOptionViewItem& option,
+               const QModelIndex& index) const Q_DECL_OVERRIDE
+        {
+            const QVariant checkState = index.data(Qt::CheckStateRole);
+            if (!checkState.isValid())
+            {
+                QStyledItemDelegate::paint(painter, option, index);
+                return;
+            }
+
+            QStyleOptionViewItem opt(option);
+            initStyleOption(&opt, index);
+
+            painter->save();
+
+            QColor background;
+            if (opt.state & QStyle::State_Selected)
+            {
+                background = opt.palette.highlight().color();
+            }
+            else if (opt.features & QStyleOptionViewItem::Alternate)
+            {
+                background = opt.palette.alternateBase().color();
+            }
+            else
+            {
+                background = opt.palette.base().color();
+            }
+            painter->fillRect(opt.rect, background);
+
+            const QString text = opt.text;
+            drawCheckBox(painter, checkBoxRect(opt, text), opt,
+                         checkState.toInt() == Qt::Checked);
+
+            if (!text.isEmpty())
+            {
+                QRect textRect = opt.rect.adjusted(
+                    CHECKBOX_SIZE + 2 * CHECKBOX_PADDING, 0,
+                    -CHECKBOX_PADDING, 0);
+
+                QColor textColor;
+                if (opt.state & QStyle::State_Selected)
+                {
+                    textColor = opt.palette.highlightedText().color();
+                }
+                else
+                {
+                    textColor = index.data(Qt::ForegroundRole).value<QColor>();
+                }
+                if (!textColor.isValid()) textColor = opt.palette.text().color();
+
+                painter->setFont(opt.font);
+                painter->setPen(textColor);
+                painter->drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, text);
+            }
+
+            painter->restore();
+        }
+
+    bool editorEvent(QEvent* event, QAbstractItemModel* model,
+                     const QStyleOptionViewItem& option,
+                     const QModelIndex& index) Q_DECL_OVERRIDE
+        {
+            if (event->type() == QEvent::MouseButtonRelease &&
+                index.data(Qt::CheckStateRole).isValid())
+            {
+                auto me = static_cast<QMouseEvent*>(event);
+                if (me->button() == Qt::LeftButton)
+                {
+                    QStyleOptionViewItem opt(option);
+                    initStyleOption(&opt, index);
+                    if (checkBoxRect(opt, opt.text).contains(me->pos()))
+                    {
+                        auto state = opt.checkState == Qt::Checked ?
+                            Qt::Unchecked : Qt::Checked;
+                        return model->setData(index, state, Qt::CheckStateRole);
+                    }
+                }
+            }
+
+            return QStyledItemDelegate::editorEvent(event, model, option, index);
+        }
+
+private:
+    static constexpr int CHECKBOX_SIZE = 14;
+    static constexpr int CHECKBOX_PADDING = 5;
+
+    static QRect checkBoxRect(const QStyleOptionViewItem& opt,
+                              const QString& text)
+        {
+            const int y = opt.rect.center().y() - CHECKBOX_SIZE / 2;
+            if (text.isEmpty())
+            {
+                const int x = opt.rect.center().x() - CHECKBOX_SIZE / 2;
+                return QRect(x, y, CHECKBOX_SIZE, CHECKBOX_SIZE);
+            }
+            return QRect(opt.rect.left() + CHECKBOX_PADDING, y,
+                         CHECKBOX_SIZE, CHECKBOX_SIZE);
+        }
+
+    static void drawCheckBox(QPainter* painter, const QRect& rect,
+                             const QStyleOptionViewItem& opt, bool checked)
+        {
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing, true);
+
+            const QColor accent(70, 141, 255);
+            QColor fill = checked ? accent : opt.palette.base().color();
+            QColor border = checked ? accent.darker(110) : opt.palette.mid().color();
+
+            painter->setPen(QPen(border, 1.2));
+            painter->setBrush(fill);
+            painter->drawRoundedRect(rect.adjusted(0, 0, -1, -1), 3, 3);
+
+            if (checked)
+            {
+                QPainterPath checkMark;
+                checkMark.moveTo(rect.left() + 3.0, rect.center().y() + 0.5);
+                checkMark.lineTo(rect.center().x() - 0.5, rect.bottom() - 3.0);
+                checkMark.lineTo(rect.right() - 2.5, rect.top() + 3.0);
+
+                painter->setPen(QPen(Qt::white, 1.8, Qt::SolidLine,
+                                     Qt::RoundCap, Qt::RoundJoin));
+                painter->setBrush(Qt::NoBrush);
+                painter->drawPath(checkMark);
+            }
+
+            painter->restore();
+        }
 };
+
 
 PlotControlPanel::PlotControlPanel(QWidget *parent) :
     QWidget(parent),
@@ -76,7 +217,7 @@ PlotControlPanel::PlotControlPanel(QWidget *parent) :
 {
     ui->setupUi(this);
 
-    delegate = new SpinBoxDelegate();
+    delegate = new ChannelInfoDelegate();
     ui->tvChannelInfo->setItemDelegate(delegate);
 
     warnNumOfSamples = true;    // TODO: load from settings
@@ -110,6 +251,13 @@ PlotControlPanel::PlotControlPanel(QWidget *parent) :
 
     connect(ui->cbIndex, &QCheckBox::toggled,
             this, &PlotControlPanel::onIndexChecked);
+
+    connect(ui->cbTime, &QCheckBox::toggled,
+            this, &PlotControlPanel::onTimeChecked);
+
+    connect(ui->spSampleRate,
+            static_cast<void(QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+            this, &PlotControlPanel::onSampleRateChanged);
 
     connect(ui->spXmax, SIGNAL(valueChanged(double)),
             this, SLOT(onXScaleChanged()));
@@ -185,6 +333,8 @@ PlotControlPanel::PlotControlPanel(QWidget *parent) :
     hideAllAct.setToolTip(tr("Hide all channels"));
     ui->tbShowAll->setDefaultAction(&showAllAct);
     ui->tbHideAll->setDefaultAction(&hideAllAct);
+
+    updateXAxisWidgets();
 }
 
 PlotControlPanel::~PlotControlPanel()
@@ -219,6 +369,13 @@ void PlotControlPanel::onNumOfSamples(int value)
 
     _numOfSamples = value;
     emit numOfSamplesChanged(value);
+
+    // the time span of the buffer depends on its size
+    if (ui->cbTime->isChecked())
+    {
+        emitXScaleChanged();
+        emit plotWidthChanged(plotWidth());
+    }
 }
 
 bool PlotControlPanel::askNSConfirmation(int value)
@@ -321,6 +478,16 @@ bool PlotControlPanel::xAxisAsIndex() const
     return ui->cbIndex->isChecked();
 }
 
+bool PlotControlPanel::xAxisAsTime() const
+{
+    return ui->cbTime->isChecked();
+}
+
+double PlotControlPanel::sampleRate() const
+{
+    return ui->spSampleRate->value();
+}
+
 double PlotControlPanel::xMax() const
 {
     return ui->spXmax->value();
@@ -339,34 +506,95 @@ void PlotControlPanel::onRangeSelected()
     ui->cbAutoScale->setChecked(false);
 }
 
-void PlotControlPanel::onIndexChecked(bool checked)
+void PlotControlPanel::updateXAxisWidgets()
 {
-    if (checked)
-    {
-        ui->lXmin->setEnabled(false);
-        ui->lXmax->setEnabled(false);
-        ui->spXmin->setEnabled(false);
-        ui->spXmax->setEnabled(false);
+    const bool index = xAxisAsIndex();
+    const bool time = xAxisAsTime();
 
+    // X limits only apply when x axis is neither index nor time
+    ui->lXmin->setEnabled(!index && !time);
+    ui->lXmax->setEnabled(!index && !time);
+    ui->spXmin->setEnabled(!index && !time);
+    ui->spXmax->setEnabled(!index && !time);
+
+    // sample rate is only used for the time axis
+    ui->lSampleRate->setEnabled(time);
+    ui->spSampleRate->setEnabled(time);
+}
+
+void PlotControlPanel::emitXScaleChanged()
+{
+    if (xAxisAsTime())
+    {
+        emit xScaleChanged(false, 0., timeSpan());
+    }
+    else if (xAxisAsIndex())
+    {
         emit xScaleChanged(true); // use index
     }
     else
     {
-        ui->lXmin->setEnabled(true);
-        ui->lXmax->setEnabled(true);
-        ui->spXmin->setEnabled(true);
-        ui->spXmax->setEnabled(true);
-
         emit xScaleChanged(false, ui->spXmin->value(), ui->spXmax->value());
     }
+}
+
+double PlotControlPanel::timeSpan() const
+{
+    // Samples are taken every 1/rate seconds, the last sample in the buffer
+    // is at (N-1)/rate.
+    return double(ui->spNumOfSamples->value() - 1) / sampleRate();
+}
+
+void PlotControlPanel::onIndexChecked(bool checked)
+{
+    const bool wasTime = xAxisAsTime();
+
+    if (checked && wasTime)
+    {
+        // index and time axes are mutually exclusive
+        QSignalBlocker blocker(ui->cbTime);
+        ui->cbTime->setChecked(false);
+    }
+
+    updateXAxisWidgets();
+
+    if (wasTime) emit timeAxisChanged(false);
+
+    emitXScaleChanged();
+    emit plotWidthChanged(plotWidth());
+}
+
+void PlotControlPanel::onTimeChecked(bool checked)
+{
+    if (checked && xAxisAsIndex())
+    {
+        // index and time axes are mutually exclusive
+        QSignalBlocker blocker(ui->cbIndex);
+        ui->cbIndex->setChecked(false);
+    }
+
+    updateXAxisWidgets();
+
+    emit timeAxisChanged(checked);
+    emitXScaleChanged();
+    emit plotWidthChanged(plotWidth());
+}
+
+void PlotControlPanel::onSampleRateChanged(double value)
+{
+    Q_UNUSED(value);
+
+    if (!xAxisAsTime()) return;
+
+    emitXScaleChanged();
     emit plotWidthChanged(plotWidth());
 }
 
 void PlotControlPanel::onXScaleChanged()
 {
-    if (!xAxisAsIndex())
+    if (!xAxisAsIndex() && !xAxisAsTime())
     {
-        emit xScaleChanged(false, ui->spXmin->value(), ui->spXmax->value());
+        emitXScaleChanged();
         emit plotWidthChanged(plotWidth());
     }
 }
@@ -374,7 +602,12 @@ void PlotControlPanel::onXScaleChanged()
 double PlotControlPanel::plotWidth() const
 {
     double value = ui->spPlotWidth->value();
-    if (!xAxisAsIndex())
+    if (xAxisAsTime())
+    {
+        // plot width is in samples, convert it to seconds
+        value /= sampleRate();
+    }
+    else if (!xAxisAsIndex())
     {
         // scale by xmin and xmax
         auto xmax = ui->spXmax->value();
@@ -454,6 +687,8 @@ void PlotControlPanel::saveSettings(QSettings* settings)
     settings->setValue(SG_Plot_NumOfSamples, numOfSamples());
     settings->setValue(SG_Plot_PlotWidth, ui->spPlotWidth->value());
     settings->setValue(SG_Plot_IndexAsX, xAxisAsIndex());
+    settings->setValue(SG_Plot_TimeAsX, xAxisAsTime());
+    settings->setValue(SG_Plot_SampleRate, sampleRate());
     settings->setValue(SG_Plot_XMax, xMax());
     settings->setValue(SG_Plot_XMin, xMin());
     settings->setValue(SG_Plot_AutoScale, autoScale());
@@ -470,8 +705,12 @@ void PlotControlPanel::loadSettings(QSettings* settings)
         settings->value(SG_Plot_NumOfSamples, numOfSamples()).toInt());
     ui->spPlotWidth->setValue(
         settings->value(SG_Plot_PlotWidth, ui->spPlotWidth->value()).toInt());
+    ui->spSampleRate->setValue(
+        settings->value(SG_Plot_SampleRate, sampleRate()).toDouble());
     ui->cbIndex->setChecked(
         settings->value(SG_Plot_IndexAsX, xAxisAsIndex()).toBool());
+    ui->cbTime->setChecked(
+        settings->value(SG_Plot_TimeAsX, xAxisAsTime()).toBool());
     ui->spXmax->setValue(settings->value(SG_Plot_XMax, xMax()).toDouble());
     ui->spXmin->setValue(settings->value(SG_Plot_XMin, xMin()).toDouble());
     ui->cbAutoScale->setChecked(

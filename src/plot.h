@@ -23,6 +23,7 @@
 #include <QColor>
 #include <QList>
 #include <QAction>
+#include <QString>
 #include <qwt_plot.h>
 #include <qwt_plot_grid.h>
 #include <qwt_plot_shapeitem.h>
@@ -63,6 +64,7 @@ public slots:
     void darkBackground(bool enabled = true);
     void setYAxis(bool autoScaled, double yMin = 0, double yMax = 1);
     void setXAxis(double xMin, double xMax);
+    void setXAxisTitle(const QString& title);
     void setSymbols(ShowSymbols shown);
     void setLegendPosition(Qt::AlignmentFlag alignment);
 

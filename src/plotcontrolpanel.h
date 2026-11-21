@@ -45,6 +45,8 @@ public:
     double yMax() const;
     double yMin() const;
     bool   xAxisAsIndex() const;
+    bool   xAxisAsTime() const;
+    double sampleRate() const;
     double xMax() const;
     double xMin() const;
     /// Returns the plot width adjusted for x axis scaling.
@@ -61,6 +63,8 @@ signals:
     void numOfSamplesChanged(int value);
     void yScaleChanged(bool autoScaled, double yMin = 0, double yMax = 1);
     void xScaleChanged(bool asIndex, double xMin = 0, double xMax = 1);
+    /// Emitted when the x axis switches between time and its other modes
+    void timeAxisChanged(bool asTime);
     void plotWidthChanged(double width);
     void lineThicknessChanged(int thickness);
 
@@ -83,12 +87,21 @@ private:
     /// Set the color displayed by color selector button
     void setSelectorColor(QColor color);
 
+    /// X axis range covered by the buffer when displaying time (in seconds)
+    double timeSpan() const;
+    /// Enable/disable the X axis controls according to the selected mode
+    void updateXAxisWidgets();
+    /// Emit `xScaleChanged` for the currently selected X axis mode
+    void emitXScaleChanged();
+
 private slots:
     void onNumOfSamples(int value);
     void onAutoScaleChecked(bool checked);
     void onYScaleChanged();
     void onRangeSelected();
     void onIndexChecked(bool checked);
+    void onTimeChecked(bool checked);
+    void onSampleRateChanged(double value);
     void onXScaleChanged();
     void onPlotWidthChanged();
     void onColorSelect();

@@ -96,6 +96,7 @@ void PlotManager::construct(QWidget* plotArea, PlotMenu* menu)
     _yMin = 0;
     _yMax = 1;
     _xAxisAsIndex = true;
+    _xAxisAsTime = false;
     isDemoShown = false;
     _numOfSamples = 1;
     _plotWidth = 1;
@@ -380,6 +381,7 @@ Plot* PlotManager::addPlotWidget()
     plot->showDemoIndicator(isDemoShown);
     plot->setYAxis(_autoScaled, _yMin, _yMax);
     plot->setNumOfSamples(_numOfSamples);
+    plot->setXAxisTitle(_xAxisAsTime ? tr("Time (s)") : QString());
 
     plot->setPlotWidth(_plotWidth);
     if (_xAxisAsIndex)
@@ -689,6 +691,15 @@ void PlotManager::setXAxis(bool asIndex, double xMin, double xMax)
         }
     }
     replot();
+}
+
+void PlotManager::setTimeAxis(bool asTime)
+{
+    _xAxisAsTime = asTime;
+    for (auto plot : plotWidgets)
+    {
+        plot->setXAxisTitle(asTime ? tr("Time (s)") : QString());
+    }
 }
 
 void PlotManager::flashSnapshotOverlay()
