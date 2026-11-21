@@ -116,6 +116,8 @@ TEST_CASE("adding data to a stream with no X", "[memory, stream, data, sink]")
     // test
     so._feed(pack);
 
+    REQUIRE(s.usedSamples() == 5);
+
     for (unsigned ci = 0; ci < 3; ci++)
     {
         const StreamChannel* c = s.channel(ci);
@@ -130,6 +132,12 @@ TEST_CASE("adding data to a stream with no X", "[memory, stream, data, sink]")
             REQUIRE(y->sample(i) == i-5);
         }
     }
+
+    // fill the buffer, then wrap around once
+    so._feed(pack);
+    REQUIRE(s.usedSamples() == 10);
+    so._feed(pack);
+    REQUIRE(s.usedSamples() == 10);
 }
 
 // TODO: enable test when `Stream` supports X channel
@@ -241,6 +249,8 @@ TEST_CASE("clear stream data", "[memory, stream, pause]")
     so._feed(pack);
     s.clear();
 
+    REQUIRE(s.usedSamples() == 0);
+
     for (unsigned ci = 0; ci < 3; ci++)
     {
         const StreamChannel* c = s.channel(ci);
@@ -251,6 +261,45 @@ TEST_CASE("clear stream data", "[memory, stream, pause]")
             REQUIRE(y->sample(i) == 0);
         }
     }
+}
+
+TEST_CASE("replacing the buffer contents", "[memory, stream, data]")
+{
+    Stream s(2, false, 5);
+
+    QVector<QVector<double>> data(2);
+    data[0] = {1, 2, 3};
+    data[1] = {10, 20, 30};
+
+    REQUIRE(s.replaceBuffer(data, {"A", "B"}));
+    REQUIRE(s.usedSamples() == 3);
+    REQUIRE(s.infoModel()->name(0) == "A");
+    REQUIRE(s.infoModel()->name(1) == "B");
+
+    // partial data is stored at the end of the ring buffer
+    const unsigned start = s.numSamples() - s.usedSamples();
+    for (unsigned i = 0; i < s.usedSamples(); i++)
+    {
+        REQUIRE(s.channel(0)->yData()->sample(start + i) == data[0][i]);
+        REQUIRE(s.channel(1)->yData()->sample(start + i) == data[1][i]);
+    }
+
+    // more rows than capacity: only the newest rows are kept
+    QVector<QVector<double>> large(2);
+    large[0] = {1, 2, 3, 4, 5, 6, 7, 8};
+    large[1] = {10, 20, 30, 40, 50, 60, 70, 80};
+    REQUIRE(s.replaceBuffer(large, {"X", "Y"}));
+    REQUIRE(s.usedSamples() == 5);
+    for (unsigned i = 0; i < 5; i++)
+    {
+        REQUIRE(s.channel(0)->yData()->sample(i) == large[0][i + 3]);
+        REQUIRE(s.channel(1)->yData()->sample(i) == large[1][i + 3]);
+    }
+
+    // the channel count must match
+    QVector<QVector<double>> wrong(1);
+    wrong[0] = {1, 2, 3};
+    REQUIRE_FALSE(s.replaceBuffer(wrong, {"A"}));
 }
 
 TEST_CASE("changing X axis replaces the X buffer", "[memory, stream, x]")

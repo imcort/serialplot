@@ -26,6 +26,8 @@
 #include <QFileDialog>
 #include <QSaveFile>
 #include <QTextStream>
+#include <QVector>
+#include <QStringList>
 #include <QRegularExpression>
 #include <QCompleter>
 #include <QFileSystemModel>
@@ -35,6 +37,85 @@
 #include "ui_recordpanel.h"
 #include "setting_defines.h"
 #include "csvutils.h"
+
+namespace {
+
+/// Picks the most likely column separator from the CSV header line.
+QChar detectSeparator(const QString& line)
+{
+    int commas = 0;
+    int semicolons = 0;
+    int tabs = 0;
+    bool quoted = false;
+
+    for (const QChar c : line)
+    {
+        if (c == '"')
+        {
+            quoted = !quoted;
+        }
+        else if (!quoted)
+        {
+            if (c == ',') commas++;
+            else if (c == ';') semicolons++;
+            else if (c == '\t') tabs++;
+        }
+    }
+
+    if (tabs > 0 && tabs >= commas && tabs >= semicolons) return '\t';
+    if (semicolons > 0 && semicolons > commas) return ';';
+    return ',';
+}
+
+/// Parses one CSV line, honoring quoted fields.
+QStringList parseCsvLine(const QString& line, QChar separator)
+{
+    QStringList fields;
+    QString field;
+    bool quoted = false;
+
+    for (int i = 0; i < line.size(); i++)
+    {
+        const QChar c = line[i];
+        if (quoted)
+        {
+            if (c == '"')
+            {
+                if (i + 1 < line.size() && line[i + 1] == '"')
+                {
+                    field += '"';
+                    i++;
+                }
+                else
+                {
+                    quoted = false;
+                }
+            }
+            else
+            {
+                field += c;
+            }
+        }
+        else if (c == '"')
+        {
+            quoted = true;
+        }
+        else if (c == separator)
+        {
+            fields.append(field);
+            field.clear();
+        }
+        else
+        {
+            field += c;
+        }
+    }
+
+    fields.append(field);
+    return fields;
+}
+
+} // namespace
 
 RecordPanel::RecordPanel(Stream* stream, QWidget *parent) :
     QWidget(parent),
@@ -433,6 +514,197 @@ bool RecordPanel::saveBufferToFile(const QString& fileName)
         return false;
     }
 
+    return true;
+}
+
+void RecordPanel::loadBuffer()
+{
+    QWidget* dialogParent = window();
+    const QString fileName = QFileDialog::getOpenFileName(
+        dialogParent, tr("Load CSV into Buffer"), QString(),
+        tr("CSV files (*.csv);;All files (*)"));
+
+    if (fileName.isEmpty()) return;
+
+    if (loadBufferFromFile(fileName))
+    {
+        qInfo() << "Loaded CSV into buffer:" << fileName;
+    }
+}
+
+bool RecordPanel::loadBufferFromFile(const QString& fileName)
+{
+    QWidget* dialogParent = window();
+    auto fail = [&](const QString& message)
+    {
+        qCritical().noquote() << message;
+        QMessageBox::critical(dialogParent, tr("Load to Buffer"), message);
+        return false;
+    };
+
+    QFile file(fileName);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        return fail(tr("Could not open file:\n%1\n%2")
+                    .arg(fileName, file.errorString()));
+    }
+
+    QTextStream stream(&file);
+    QString line;
+    unsigned lineNo = 0;
+
+    if (!stream.readLineInto(&line))
+    {
+        return fail(tr("The file is empty."));
+    }
+    lineNo++;
+
+    if (line.trimmed().isEmpty())
+    {
+        return fail(tr("The file has no header line."));
+    }
+
+    const QChar separator = detectSeparator(line);
+    const QStringList header = parseCsvLine(line.trimmed(), separator);
+
+    // Older recordings can contain a leading timestamp column. Marker columns
+    // are not data channels and are skipped as well.
+    const bool hasTimestamp = header.size() > 1 &&
+        header[0].trimmed().compare("timestamp", Qt::CaseInsensitive) == 0;
+
+    const QString markerName = tr("Marker");
+    const QString markerValueName = tr("Marker Value");
+
+    QVector<int> dataColumns;
+    QStringList names;
+    for (int i = 0; i < header.size(); i++)
+    {
+        if (hasTimestamp && i == 0) continue;
+
+        const QString name = header[i].trimmed();
+        if (name.compare(markerName, Qt::CaseInsensitive) == 0 ||
+            name.compare(markerValueName, Qt::CaseInsensitive) == 0)
+        {
+            continue;
+        }
+
+        dataColumns.append(i);
+        names.append(name.isEmpty() ? tr("Channel %1").arg(i + 1) : name);
+    }
+
+    const int numDataColumns = dataColumns.size();
+    if (numDataColumns == 0)
+    {
+        return fail(tr("No data columns found in the CSV header."));
+    }
+
+    if (numDataColumns != int(_stream->numChannels()))
+    {
+        return fail(tr("The CSV file has %1 data columns, but the current data "
+                       "format has %2 channels.\n"
+                       "Set the channel count in the Data Format tab to match "
+                       "the file.")
+                    .arg(numDataColumns).arg(_stream->numChannels()));
+    }
+
+    // First pass: validate every value and count the rows. This also makes
+    // sure that a broken file doesn't clear the current buffer.
+    unsigned rowCount = 0;
+    while (stream.readLineInto(&line))
+    {
+        lineNo++;
+        if (line.trimmed().isEmpty()) continue;
+
+        const QStringList fields = parseCsvLine(line.trimmed(), separator);
+        for (int ci = 0; ci < numDataColumns; ci++)
+        {
+            const int column = dataColumns[ci];
+            if (column >= fields.size())
+            {
+                return fail(tr("Line %1: expected at least %2 columns.")
+                            .arg(lineNo).arg(column + 1));
+            }
+
+            bool ok;
+            fields[column].trimmed().toDouble(&ok);
+            if (!ok)
+            {
+                return fail(tr("Line %1, column %2: \"%3\" is not a number.")
+                            .arg(lineNo).arg(column + 1)
+                            .arg(fields[column].trimmed()));
+            }
+        }
+        rowCount++;
+    }
+
+    if (rowCount == 0)
+    {
+        return fail(tr("The CSV file has no data rows."));
+    }
+
+    const unsigned capacity = _stream->numSamples();
+    const unsigned skip = rowCount > capacity ? rowCount - capacity : 0;
+    const unsigned storedRows = rowCount - skip;
+
+    if (skip > 0)
+    {
+        qWarning() << "CSV file has" << rowCount << "rows, buffer capacity is"
+                   << capacity << "- loading the last" << storedRows << "rows.";
+    }
+
+    // Second pass: read only the rows that fit into the buffer.
+    file.close();
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        return fail(tr("Could not reopen file:\n%1\n%2")
+                    .arg(fileName, file.errorString()));
+    }
+
+    QTextStream stream2(&file);
+    if (!stream2.readLineInto(&line))
+    {
+        return fail(tr("Could not read the CSV header again."));
+    }
+
+    QVector<QVector<double>> data(numDataColumns);
+    for (auto& column : data) column.reserve(storedRows);
+
+    unsigned rowIndex = 0;
+    lineNo = 1;
+    while (stream2.readLineInto(&line))
+    {
+        lineNo++;
+        if (line.trimmed().isEmpty()) continue;
+
+        if (rowIndex < skip)
+        {
+            rowIndex++;
+            continue;
+        }
+
+        const QStringList fields = parseCsvLine(line.trimmed(), separator);
+        for (int ci = 0; ci < numDataColumns; ci++)
+        {
+            const int column = dataColumns[ci];
+            bool ok;
+            const double value = fields.value(column).trimmed().toDouble(&ok);
+            if (!ok)
+            {
+                return fail(tr("Line %1, column %2: invalid number.")
+                            .arg(lineNo).arg(column + 1));
+            }
+            data[ci].append(value);
+        }
+        rowIndex++;
+    }
+
+    if (!_stream->replaceBuffer(data, names))
+    {
+        return fail(tr("Could not replace the buffer contents."));
+    }
+
+    qInfo() << "Loaded" << storedRows << "of" << rowCount
+            << "rows from" << fileName;
     return true;
 }
 

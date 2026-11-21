@@ -87,6 +87,41 @@ unsigned Stream::usedSamples() const
     return static_cast<const RingBuffer*>(channels[0]->yData())->validSamples();
 }
 
+bool Stream::replaceBuffer(const QVector<QVector<double>>& data,
+                           const QStringList& names)
+{
+    if (data.isEmpty() || data.size() != int(numChannels())) return false;
+
+    const unsigned rows = data[0].size();
+    for (const auto& channelData : data)
+    {
+        if (channelData.size() != int(rows)) return false;
+    }
+
+    clear();
+    _totalSamples = rows;
+
+    for (unsigned ci = 0; ci < numChannels(); ci++)
+    {
+        if (int(ci) < names.size())
+        {
+            _infoModel.setData(
+                _infoModel.index(ci, ChannelInfoModel::COLUMN_NAME),
+                names[ci], Qt::EditRole);
+        }
+
+        // Keep the newest samples when the file is larger than the buffer.
+        const unsigned skip = rows > _numSamples ? rows - _numSamples : 0;
+        const unsigned count = rows - skip;
+        auto buffer = static_cast<RingBuffer*>(channels[ci]->yData());
+        buffer->addSamples(
+            const_cast<double*>(data[ci].constData() + skip), count);
+    }
+
+    emit dataAdded();
+    return true;
+}
+
 const StreamChannel* Stream::channel(unsigned index) const
 {
     Q_ASSERT(index < numChannels());

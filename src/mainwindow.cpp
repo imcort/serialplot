@@ -120,6 +120,14 @@ MainWindow::MainWindow(QWidget *parent) :
             &recordPanel, &RecordPanel::saveBuffer);
     ui->plotToolBar->addWidget(saveBufferButton);
 
+    auto loadBufferButton = new QPushButton(tr("Load to Buffer"), this);
+    loadBufferButton->setObjectName("tbLoadBuffer");
+    loadBufferButton->setToolTip(
+        tr("Load a CSV file into the current buffer"));
+    connect(loadBufferButton, &QPushButton::clicked,
+            &recordPanel, &RecordPanel::loadBuffer);
+    ui->plotToolBar->addWidget(loadBufferButton);
+
     menuBar()->insertMenu(ui->menuHelp->menuAction(), snapshotMan.menu());
     menuBar()->insertMenu(ui->menuHelp->menuAction(), commandPanel.menu());
 

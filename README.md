@@ -88,6 +88,32 @@ deployment target is at least as old as the desired macOS version (for example
 the official Qt 6.8 builds support macOS 12 and newer). Homebrew add-on modules
 may be built for the host version only; you can check with `otool -l <framework>`.
 
+### macOS disk image (DMG)
+
+`scripts/make-macos-dmg.sh` builds a Release bundle, copies in the required Qt,
+Qwt and plugin binaries with `macdeployqt`, signs it and wraps it in a
+drag-to-Applications disk image:
+
+    scripts/make-macos-dmg.sh
+
+The result is written to `dist/SerialPlot-<version>-macos<min>-<arch>.dmg` and
+contains the app, an `Applications` link, a short Read Me and the license.
+The script raises the minimum macOS version automatically when the installed
+Qt modules were built for a newer system, and the file name reflects the real
+minimum.
+
+By default the app is signed ad-hoc, which is enough to run after the
+recipient allows it in System Settings, but it still triggers Gatekeeper's
+"unidentified developer" warning. For a warning-free download, sign with a
+Developer ID certificate and notarize:
+
+    CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+    NOTARY_PROFILE="notarytool-keychain-profile" \
+    scripts/make-macos-dmg.sh
+
+`NOTARY_PROFILE` is the keychain profile created with
+`xcrun notarytool store-credentials`.
+
 ## License
 
 This software is licensed under GPLv3 excluding some third party

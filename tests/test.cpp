@@ -260,6 +260,46 @@ TEST_CASE("RingBuffer initial values should be 0", "[memory, buffer]")
     }
 }
 
+TEST_CASE("RingBuffer initial fill uses the first sample", "[memory, buffer]")
+{
+    RingBuffer buf(10);
+    double first = 42.;
+
+    buf.addSamples(&first, 1);
+
+    // The untouched part of the buffer starts at the first real value, not
+    // zero, so that auto scaling doesn't include a fake zero.
+    for (unsigned i = 0; i < 10; i++)
+    {
+        REQUIRE(buf.sample(i) == first);
+    }
+    auto lim = buf.limits();
+    REQUIRE(lim.start == first);
+    REQUIRE(lim.end == first);
+}
+
+TEST_CASE("RingBuffer tracks the number of valid samples", "[memory, buffer]")
+{
+    RingBuffer buf(10);
+    double values[5] = {1, 2, 3, 4, 5};
+
+    REQUIRE(buf.validSamples() == 0);
+    buf.addSamples(values, 3);
+    REQUIRE(buf.validSamples() == 3);
+    buf.addSamples(&values[3], 2);
+    REQUIRE(buf.validSamples() == 5);
+    buf.addSamples(values, 5);
+    REQUIRE(buf.validSamples() == 10);
+    buf.addSamples(values, 5);
+    REQUIRE(buf.validSamples() == 10);
+
+    buf.resize(4);
+    REQUIRE(buf.validSamples() == 4);
+
+    buf.clear();
+    REQUIRE(buf.validSamples() == 0);
+}
+
 TEST_CASE("RingBuffer data access", "[memory, buffer]")
 {
     RingBuffer buf(10);
@@ -295,9 +335,11 @@ TEST_CASE("making RingBuffer bigger should keep end values", "[memory, buffer]")
     buf.resize(10);
 
     REQUIRE(buf.size() == 10);
+    // The newly added beginning is filled with the oldest real sample, not
+    // with zero, so that auto scaling doesn't include a fake zero.
     for (unsigned i = 0; i < 5; i++)
     {
-        REQUIRE(buf.sample(i) == 0);
+        REQUIRE(buf.sample(i) == values[0]);
     }
     for (unsigned i = 5; i < 10; i++)
     {
@@ -362,6 +404,18 @@ TEST_CASE("RingBuffer clear", "[memory, buffer]")
     auto lim = buf.limits();
     REQUIRE(lim.start == 0.);
     REQUIRE(lim.end == 0.);
+
+    // The first sample after a clear fills the whole buffer, again avoiding
+    // a fake zero in the auto-scaled range.
+    double first = 42.;
+    buf.addSamples(&first, 1);
+    for (unsigned i = 0; i < 10; i++)
+    {
+        REQUIRE(buf.sample(i) == first);
+    }
+    lim = buf.limits();
+    REQUIRE(lim.start == first);
+    REQUIRE(lim.end == first);
 }
 
 TEST_CASE("ReadOnlyBuffer", "[memory, buffer]")

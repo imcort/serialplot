@@ -46,6 +46,10 @@ public:
     /// @return true on success
     bool saveBufferToFile(const QString& fileName);
 
+    /// Loads a CSV file into the current buffers.
+    /// @return true on success
+    bool loadBufferFromFile(const QString& fileName);
+
     /// Stores settings into a `QSettings`
     void saveSettings(QSettings* settings);
     /// Loads settings from a `QSettings`.
@@ -61,6 +65,9 @@ public slots:
 
     /// Asks for a file name and saves the current stream buffer
     void saveBuffer();
+
+    /// Asks for a CSV file and loads it into the current buffers
+    void loadBuffer();
 
 private:
     Ui::RecordPanel *ui;

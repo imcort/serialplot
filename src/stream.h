@@ -64,6 +64,19 @@ public:
     unsigned numSamples() const;
     /// Number of valid (received) samples currently in the buffers
     unsigned usedSamples() const;
+
+    /**
+     * Replaces the current buffer contents with the given channel data.
+     *
+     * The number of data vectors must match the current number of channels.
+     * Rows that don't fit into the buffer are dropped from the beginning,
+     * keeping the newest `numSamples()` rows. Channel names are updated from
+     * `names` when provided.
+     *
+     * @return false when the data does not match the current channels
+     */
+    bool replaceBuffer(const QVector<QVector<double>>& data,
+                       const QStringList& names);
     const StreamChannel* channel(unsigned index) const;
     StreamChannel* channel(unsigned index);
     QVector<const StreamChannel*> allChannels() const;

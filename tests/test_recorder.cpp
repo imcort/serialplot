@@ -49,8 +49,7 @@ TEST_CASE("test recording single channel", "[recorder]")
 
     // test
     rec.setDecimals(0); // the file should contain whole numbers
-    rec.startRecording(fileName, ",", channelNames,
-                       DataRecorder::TimestampOption::disabled);
+    rec.startRecording(fileName, ",", channelNames);
     source._feed(samples);
     rec.stopRecording();
 
@@ -91,8 +90,7 @@ TEST_CASE("test recording multiple channels", "[recorder]")
 
     // test
     rec.setDecimals(0); // the file should contain whole numbers
-    rec.startRecording(fileName, ",", channelNames,
-                       DataRecorder::TimestampOption::disabled);
+    rec.startRecording(fileName, ",", channelNames);
     source._feed(samples);
     rec.stopRecording();
 
@@ -145,8 +143,7 @@ TEST_CASE("recording writes the received marker values", "[recorder, marker]")
         samples.data(0)[i] = i + 1;
     }
 
-    REQUIRE(rec.startRecording(fileName, ",", {"Channel 1", "Marker", "Marker Value"},
-                               DataRecorder::TimestampOption::disabled));
+    REQUIRE(rec.startRecording(fileName, ",", {"Channel 1", "Marker", "Marker Value"}));
     source._feed(samples);
     rec.stopRecording();
 
@@ -185,8 +182,7 @@ TEST_CASE("recording starts at the current sample index", "[recorder, marker]")
     samples.data(0)[1] = 2;
     samples.data(0)[2] = 3;
 
-    REQUIRE(rec.startRecording(fileName, ",", {"Channel 1", "Marker", "Marker Value"},
-                               DataRecorder::TimestampOption::disabled));
+    REQUIRE(rec.startRecording(fileName, ",", {"Channel 1", "Marker", "Marker Value"}));
     source._feed(samples);
     rec.stopRecording();
 
@@ -214,8 +210,7 @@ TEST_CASE("recording without a marker provider has no extra column", "[recorder,
     samples.data(0)[0] = 7;
     samples.data(0)[1] = 8;
 
-    REQUIRE(rec.startRecording(fileName, ",", {"Channel 1"},
-                               DataRecorder::TimestampOption::disabled));
+    REQUIRE(rec.startRecording(fileName, ",", {"Channel 1"}));
     source._feed(samples);
     rec.stopRecording();
 
@@ -250,8 +245,7 @@ TEST_CASE("marker values that break the CSV are quoted", "[recorder, marker]")
         samples.data(0)[i] = i + 1;
     }
 
-    REQUIRE(rec.startRecording(fileName, ",", {"Channel 1", "Marker", "Marker Value"},
-                               DataRecorder::TimestampOption::disabled));
+    REQUIRE(rec.startRecording(fileName, ",", {"Channel 1", "Marker", "Marker Value"}));
     source._feed(samples);
     rec.stopRecording();
 
