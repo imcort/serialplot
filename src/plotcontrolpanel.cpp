@@ -701,8 +701,16 @@ void PlotControlPanel::saveSettings(QSettings* settings)
 void PlotControlPanel::loadSettings(QSettings* settings)
 {
     settings->beginGroup(SettingGroup_Plot);
+
+    // Restoring a saved (possibly large) buffer size must not open the
+    // confirmation dialog: doing so at startup can block the whole UI if the
+    // dialog ends up behind the main window or on another screen.
+    const bool warnNumOfSamplesBeforeLoad = warnNumOfSamples;
+    warnNumOfSamples = false;
     ui->spNumOfSamples->setValue(
         settings->value(SG_Plot_NumOfSamples, numOfSamples()).toInt());
+    warnNumOfSamples = warnNumOfSamplesBeforeLoad;
+
     ui->spPlotWidth->setValue(
         settings->value(SG_Plot_PlotWidth, ui->spPlotWidth->value()).toInt());
     ui->spSampleRate->setValue(

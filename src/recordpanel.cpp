@@ -20,13 +20,13 @@
 #include <QIcon>
 #include <QFile>
 #include <QFileInfo>
+#include <QDir>
+#include <QDateTime>
 #include <QMessageBox>
 #include <QFileDialog>
 #include <QRegularExpression>
 #include <QCompleter>
 #include <QFileSystemModel>
-#include <QFileSystemModel>
-#include <QtDebug>
 #include <ctime>
 
 #include "recordpanel.h"
@@ -56,30 +56,12 @@ RecordPanel::RecordPanel(Stream* stream, QWidget *parent) :
     connect(&recordAction, &QAction::triggered,
             this, &RecordPanel::onRecord);
 
-    connect(ui->cbRecordPaused, SIGNAL(toggled(bool)),
-            this, SIGNAL(recordPausedChanged(bool)));
-
-    connect(ui->cbDisableBuffering, &QCheckBox::toggled,
-            [this](bool enabled)
-            {
-                recorder.disableBuffering = enabled;
-            });
-
-    connect(ui->cbWindowsLE, &QCheckBox::toggled,
-            [this](bool enabled)
-            {
-                recorder.windowsLE = enabled;
-            });
-
     connect(ui->spDecimals, &QSpinBox::valueChanged,
             [this](int decimals)
             {
                 recorder.setDecimals(decimals);
             });
 
-
-    connect(&recordAction, &QAction::toggled, ui->cbWindowsLE, &QWidget::setDisabled);
-    connect(&recordAction, &QAction::toggled, ui->cbTimestamp, &QWidget::setDisabled);
     connect(&recordAction, &QAction::toggled, ui->leSeparator, &QWidget::setDisabled);
     connect(&recordAction, &QAction::toggled, ui->pbBrowse, &QWidget::setDisabled);
 
@@ -89,14 +71,6 @@ RecordPanel::RecordPanel(Stream* stream, QWidget *parent) :
     completer->setModel(fileSystemModel);
     completer->setCaseSensitivity(Qt::CaseInsensitive);
     ui->leFileName->setCompleter(completer);
-
-    // setup timestamp selection
-    ui->cbTimestampFormat->addItem(tr("seconds only"),
-                                (int) DataRecorder::TimestampOption::seconds);
-    ui->cbTimestampFormat->addItem(tr("seconds with precision"),
-                                (int) DataRecorder::TimestampOption::seconds_precision);
-    ui->cbTimestampFormat->addItem(tr("milliseconds"),
-                                (int) DataRecorder::TimestampOption::milliseconds);
 }
 
 RecordPanel::~RecordPanel()
@@ -109,15 +83,14 @@ QToolBar* RecordPanel::toolbar()
     return &recordToolBar;
 }
 
-bool RecordPanel::recordPaused()
-{
-    return ui->cbRecordPaused->isChecked();
-}
-
 bool RecordPanel::selectFile()
 {
+    const QString initial = selectedFile().isEmpty() ?
+        QString("record.csv") : selectedFile();
+
     QString fileName = QFileDialog::getSaveFileName(
-        parentWidget(), tr("Select recording file"));
+        parentWidget(), tr("Select recording file"), initial,
+        tr("CSV files (*.csv);;All files (*)"));
 
     if (fileName.isEmpty())
     {
@@ -125,6 +98,7 @@ bool RecordPanel::selectFile()
     }
     else
     {
+        fileName = ensureCsvSuffix(fileName);
         setSelectedFile(fileName);
         overwriteSelected = QFile::exists(fileName);
         return true;
@@ -148,33 +122,40 @@ QString RecordPanel::getSelectedFile()
         if (!selectFile()) return QString();
     }
 
-    // assume that file name contains a time format specifier
-    if (selectedFile().contains("%"))
+    const bool hasTimestampTemplate = selectedFile().contains("%");
+    QString fileName = selectedFile();
+
+    // expand strftime placeholders such as data_%Y%m%d_%H%M%S
+    if (hasTimestampTemplate)
     {
-        auto ts = formatTimeStamp(selectedFile());
-        if (!QFile::exists(ts) || // file doesn't exists
-            confirmOverwrite(ts)) // exists but user accepted overwrite
-        {
-            return ts;
-        }
-        return QString();
+        fileName = formatTimeStamp(fileName);
     }
 
-    // if no timestamp and file exists try autoincrement option
-    if (!overwriteSelected && QFile::exists(selectedFile()))
+    fileName = ensureCsvSuffix(fileName);
+
+    // Auto date mode generates a new file name for every recording
+    if (ui->cbAutoDate->isChecked())
     {
-        if (ui->cbAutoIncrement->isChecked())
-        {
-            if (!incrementFileName()) return QString();
-        }
-        else
-        {
-            if (!confirmOverwrite(selectedFile()))
-                return QString();
-        }
+        fileName = autoDateFileName(fileName);
+        // Keep a strftime template in the edit box so that it is expanded
+        // again on the next recording.
+        if (!hasTimestampTemplate) setSelectedFile(fileName);
+        return fileName;
     }
 
-    return selectedFile();
+    // Without auto date an existing file needs confirmation, unless it was
+    // explicitly selected by the user in the file dialog.
+    if (!overwriteSelected && QFile::exists(fileName))
+    {
+        if (!confirmOverwrite(fileName)) return QString();
+        // confirmOverwrite() may have opened the file dialog
+        fileName = ensureCsvSuffix(selectedFile());
+        if (fileName.isEmpty()) return QString();
+    }
+
+    if (!hasTimestampTemplate) setSelectedFile(fileName);
+
+    return fileName;
 }
 
 QString RecordPanel::formatTimeStamp(QString t) const
@@ -231,47 +212,48 @@ void RecordPanel::onRecord(bool start)
     }
 }
 
-bool RecordPanel::incrementFileName(void)
+QString RecordPanel::ensureCsvSuffix(QString fileName) const
 {
-    QFileInfo fileInfo(selectedFile());
+    if (fileName.isEmpty()) return fileName;
 
+    QFileInfo fileInfo(fileName);
+    if (fileInfo.suffix().isEmpty())
+    {
+        if (fileName.endsWith('.')) fileName.chop(1);
+        fileName += ".csv";
+    }
+    return fileName;
+}
+
+QString RecordPanel::autoDateFileName(QString fileName) const
+{
+    fileName = ensureCsvSuffix(fileName);
+
+    QFileInfo fileInfo(fileName);
     QString base = fileInfo.completeBaseName();
-    QRegularExpression regex("(.*?)(\\d+)(?!.*\\d)(.*)");
-    auto match = regex.match(base);
+    const QString suffix = fileInfo.suffix().isEmpty() ? "csv" : fileInfo.suffix();
 
-    if (match.hasMatch())
-    {
-        bool ok;
-        int fileNum = match.captured(2).toInt(&ok);
-        base = match.captured(1) + QString::number(fileNum + 1) + match.captured(3);
-    }
-    else
-    {
-        base += "_1";
-    }
+    // Drop a timestamp added by a previous recording so that repeated
+    // recordings don't accumulate dates in the file name.
+    static const QRegularExpression dateSuffix(
+        R"(_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:_\d+)?$)");
+    base.remove(dateSuffix);
+    if (base.isEmpty()) base = "record";
 
-    QString suffix = fileInfo.suffix();;
-    if (!suffix.isEmpty())
-    {
-        suffix = "." + suffix;
-    }
+    const QString stamp =
+        QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
+    const QString dir = fileInfo.path();
+    const QString prefix = (dir == ".") ? QString() : dir + "/";
 
-    QString autoFileName = fileInfo.path() + "/" + base + suffix;
-
-    // check if auto generated file name exists, ask user another name
-    if (QFile::exists(autoFileName))
+    QString candidate = prefix + base + "_" + stamp + "." + suffix;
+    int counter = 1;
+    while (QFile::exists(candidate))
     {
-        if (!confirmOverwrite(autoFileName))
-        {
-            return false;
-        }
-    }
-    else
-    {
-        setSelectedFile(autoFileName);
+        candidate = prefix + base + "_" + stamp + "_" +
+            QString::number(counter++) + "." + suffix;
     }
 
-    return true;
+    return candidate;
 }
 
 bool RecordPanel::confirmOverwrite(QString fileName)
@@ -308,23 +290,19 @@ bool RecordPanel::confirmOverwrite(QString fileName)
 
 bool RecordPanel::startRecording(QString fileName)
 {
-    QStringList channelNames;
+    // A header is always written
+    QStringList channelNames = _stream->infoModel()->channelNames();
 
-    // markers get their own column, the recorder appends the values itself
+    // markers get their own columns, the recorder appends the values itself
     const bool withMarkers = _stream->markersEnabled();
-
-    if (ui->cbHeader->isChecked())
+    if (withMarkers)
     {
-        channelNames = _stream->infoModel()->channelNames();
-        if (withMarkers)
-        {
-            channelNames << tr("Marker") << tr("Marker Value");
-        }
+        channelNames << tr("Marker") << tr("Marker Value");
     }
 
     recorder.setMarkerProvider(withMarkers ? _stream : nullptr);
 
-    if (recorder.startRecording(fileName, getSeparator(), channelNames, currentTimestampOption()))
+    if (recorder.startRecording(fileName, getSeparator(), channelNames))
     {
         _stream->connectFollower(&recorder);
         return true;
@@ -344,7 +322,7 @@ void RecordPanel::stopRecording(void)
 
 void RecordPanel::onPortClose()
 {
-    if (recordAction.isChecked() && ui->cbStopOnClose->isChecked())
+    if (recordAction.isChecked())
     {
         stopRecording();
         recordAction.setChecked(false);
@@ -358,96 +336,21 @@ QString RecordPanel::getSeparator() const
     return sep;
 }
 
-DataRecorder::TimestampOption RecordPanel::currentTimestampOption() const
-{
-    if (ui->cbTimestamp->isChecked())
-    {
-        return static_cast<DataRecorder::TimestampOption>(ui->cbTimestampFormat->currentData().toInt());
-    }
-    else
-    {
-        return DataRecorder::TimestampOption::disabled;
-    }
-}
-
 void RecordPanel::saveSettings(QSettings* settings)
 {
     settings->beginGroup(SettingGroup_Record);
-    settings->setValue(SG_Record_AutoIncrement, ui->cbAutoIncrement->isChecked());
-    settings->setValue(SG_Record_RecordPaused, ui->cbRecordPaused->isChecked());
-    settings->setValue(SG_Record_StopOnClose, ui->cbStopOnClose->isChecked());
-    settings->setValue(SG_Record_Header, ui->cbHeader->isChecked());
-    settings->setValue(SG_Record_DisableBuffering, ui->cbDisableBuffering->isChecked());
+    settings->setValue(SG_Record_AutoDate, ui->cbAutoDate->isChecked());
     settings->setValue(SG_Record_Separator, ui->leSeparator->text());
     settings->setValue(SG_Record_Decimals, ui->spDecimals->text());
-    settings->setValue(SG_Record_Timestamp, ui->cbTimestamp->isChecked());
-
-    QString tsFormatStr;
-    auto tsOpt = static_cast<DataRecorder::TimestampOption>(ui->cbTimestampFormat->currentData().toInt());
-    switch (tsOpt)
-    {
-        case DataRecorder::TimestampOption::seconds:
-            tsFormatStr = "seconds";
-            break;
-        case DataRecorder::TimestampOption::seconds_precision:
-            tsFormatStr = "seconds_with_precision";
-            break;
-        case DataRecorder::TimestampOption::milliseconds:
-            tsFormatStr = "milliseconds";
-            break;
-        default:
-            Q_ASSERT(false);
-    }
-    settings->setValue(SG_Record_TimestampFormat, tsFormatStr);
-
     settings->endGroup();
 }
 
 void RecordPanel::loadSettings(QSettings* settings)
 {
     settings->beginGroup(SettingGroup_Record);
-    ui->cbAutoIncrement->setChecked(
-        settings->value(SG_Record_AutoIncrement, ui->cbAutoIncrement->isChecked()).toBool());
-    ui->cbRecordPaused->setChecked(
-        settings->value(SG_Record_RecordPaused, ui->cbRecordPaused->isChecked()).toBool());
-    ui->cbStopOnClose->setChecked(
-        settings->value(SG_Record_StopOnClose, ui->cbStopOnClose->isChecked()).toBool());
-    ui->cbHeader->setChecked(
-        settings->value(SG_Record_Header, ui->cbHeader->isChecked()).toBool());
-    ui->cbDisableBuffering->setChecked(
-        settings->value(SG_Record_DisableBuffering, ui->cbDisableBuffering->isChecked()).toBool());
+    ui->cbAutoDate->setChecked(
+        settings->value(SG_Record_AutoDate, ui->cbAutoDate->isChecked()).toBool());
     ui->leSeparator->setText(settings->value(SG_Record_Separator, ui->leSeparator->text()).toString());
     ui->spDecimals->setValue(settings->value(SG_Record_Decimals, ui->spDecimals->value()).toInt());
-    ui->cbTimestamp->setChecked(
-        settings->value(SG_Record_Timestamp, ui->cbTimestamp->isChecked()).toBool());
-
-    // load timestamp format
-    QString tsFormatStr = settings->value(SG_Record_TimestampFormat, "").toString();
-    // get current timestamp option
-    DataRecorder::TimestampOption tsOpt = static_cast<DataRecorder::TimestampOption>(ui->cbTimestampFormat->currentData().toInt());
-    if (tsFormatStr == "seconds")
-    {
-        tsOpt = DataRecorder::TimestampOption::seconds;
-    }
-    else if (tsFormatStr == "seconds_with_precision")
-    {
-        tsOpt = DataRecorder::TimestampOption::seconds_precision;
-    }
-    else if (tsFormatStr == "milliseconds")
-    {
-        tsOpt = DataRecorder::TimestampOption::milliseconds;
-    }
-    else if (!tsFormatStr.isEmpty())
-    {
-        qCritical() << "Invalid timestamp format option:" << tsFormatStr;
-    }
-
-    // find index of loaded option from combobox and select it
-    int i = ui->cbTimestampFormat->findData((int) tsOpt);
-    if (i >= 0)
-    {
-        ui->cbTimestampFormat->setCurrentIndex(i);
-    }
-
     settings->endGroup();
 }

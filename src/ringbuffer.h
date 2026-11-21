@@ -40,6 +40,7 @@ private:
     unsigned _size;            ///< size of `data`
     double* data;              ///< storage
     unsigned headIndex;        ///< indicates the actual `0` index of the ring buffer
+    bool hasData;              ///< false until the first samples are written
 
     mutable bool limInvalid;   ///< Indicates that limits needs to be re-calculated
     mutable Range limCache;    ///< Cache for limits()

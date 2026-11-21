@@ -26,6 +26,7 @@ RingBuffer::RingBuffer(unsigned n)
     _size = n;
     data = new double[_size]();
     headIndex = 0;
+    hasData = false;
 
     limInvalid = false;
     limCache = {0, 0};
@@ -71,12 +72,15 @@ void RingBuffer::resize(unsigned n)
         newData[i] = sample(i - offset);
     }
 
-    // fill the beginning of the new data
+    // Fill the newly added beginning with the oldest sample instead of zero.
+    // This keeps the automatic Y scaling from being stretched down to zero
+    // when the buffer is enlarged after data has been received.
     if (fill_start > 0)
     {
+        const double fillValue = newData[fill_start];
         for (int i = 0; i < fill_start; i++)
         {
-            newData[i] = 0;
+            newData[i] = fillValue;
         }
     }
 
@@ -92,6 +96,21 @@ void RingBuffer::resize(unsigned n)
 
 void RingBuffer::addSamples(double* samples, unsigned n)
 {
+    if (n == 0) return;
+
+    // Before the first samples arrive the whole buffer is zero. Fill it with
+    // the first sample value so that auto scaling isn't stretched down to
+    // zero and the plot starts from a flat line at the first real value.
+    if (!hasData)
+    {
+        for (unsigned i = 0; i < _size; i++)
+        {
+            data[i] = samples[0];
+        }
+        headIndex = 0;
+        hasData = true;
+    }
+
     unsigned shift = n;
     if (shift < _size)
     {
@@ -147,6 +166,8 @@ void RingBuffer::clear()
         data[i] = 0.;
     }
 
+    headIndex = 0;
+    hasData = false;
     limCache = {0, 0};
     limInvalid = false;
 }

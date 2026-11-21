@@ -37,23 +37,7 @@ class DataRecorder : public QObject, public Sink
 {
     Q_OBJECT
 public:
-    enum class TimestampOption
-    {
-        disabled, seconds, seconds_precision, milliseconds
-    };
-
     explicit DataRecorder(QObject *parent = 0);
-
-    /// Disables file buffering
-    bool disableBuffering;
-
-    /**
-     * Use CR+LF as line ending. `false` by default.
-     *
-     * @note Toggling this variable during a recording will result in
-     * a corrupted file. Care must be taken at higher (UI) levels.
-     */
-    bool windowsLE;
 
     /**
      * Set floating point number precision.
@@ -82,11 +66,10 @@ public:
      * @param fileName name of the recording file
      * @param separator column separator
      * @param channelNames names of the channels for header line, if empty no header line is written
-     * @param insertTime enable inserting timestamp
      * @return false if file operation fails (read only etc.)
      */
     bool startRecording(QString fileName, QString separator,
-                        QStringList channelNames, TimestampOption ts);
+                        QStringList channelNames);
 
     /**
      * @brief Adds data to a channel.
@@ -118,16 +101,10 @@ private:
     QFile file;
     QTextStream fileStream;
     QString _sep;
-    TimestampOption timestampOpt;
     const MarkerProvider* markerProvider;
     quint64 markerBase;      ///< absolute index of the first recorded sample
     quint64 writtenSamples;  ///< number of rows written so far
 
-    /// Returns formatted timestamp
-    QString formatTimestamp() const;
-
-    /// Returns the selected line ending.
-    const char* le() const;
 };
 
 #endif // DATARECORDER_H

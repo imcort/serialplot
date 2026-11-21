@@ -42,8 +42,6 @@ public:
 
     QToolBar* toolbar();
 
-    bool recordPaused();
-
     /// Stores settings into a `QSettings`
     void saveSettings(QSettings* settings);
     /// Loads settings from a `QSettings`.
@@ -52,7 +50,6 @@ public:
 signals:
     void recordStarted();
     void recordStopped();
-    void recordPausedChanged(bool enabled);
 
 public slots:
     /// Must be called when port is closed
@@ -66,15 +63,21 @@ private:
     DataRecorder recorder;
     Stream* _stream;
 
+    /// Appends a `.csv` extension if the given file name has no extension.
+    QString ensureCsvSuffix(QString fileName) const;
+
     /**
-     * @brief Increments the file name.
+     * @brief Appends the current date and time to the file name.
      *
-     * If file name doesn't have a number at the end of it, a number is appended
-     * with underscore starting from 1.
+     * The timestamp is added to the end of the base name, before the
+     * extension, in the form `_yyyy-MM-dd_HH-mm-ss`. A previously appended
+     * timestamp is removed first so that repeated recordings don't accumulate
+     * dates. A numeric suffix is added only in the unlikely event that two
+     * recordings start within the same second.
      *
-     * @return false if user cancels
+     * @return generated file name
      */
-    bool incrementFileName(void);
+    QString autoDateFileName(QString fileName) const;
 
     /**
      * @brief Used to ask user confirmation if auto generated file
@@ -96,7 +99,7 @@ private:
 
     /**
      * Tries to get a valid file name by handling user interactions and
-     * automatic naming (increment, timestamp etc).
+     * automatic naming (date suffix, strftime placeholders, extension etc).
      *
      * Returned file name can be used immediately. File name box should also be
      * set to selected file name.
@@ -114,8 +117,6 @@ private:
     /// Returns separator text from ui. "\t" is converted to TAB
     /// character.
     QString getSeparator() const;
-
-    DataRecorder::TimestampOption currentTimestampOption() const;
 
 private slots:
     /**

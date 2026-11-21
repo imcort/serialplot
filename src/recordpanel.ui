@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>627</width>
-    <height>209</height>
+    <height>140</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -27,10 +27,10 @@
           </sizepolicy>
          </property>
          <property name="toolTip">
-          <string>You can use C `strftime` function format specifiers for timestamps in your file name.</string>
+          <string>Recording file name. You can use C strftime format specifiers for timestamps in the file name. A .csv extension is added automatically if no extension is given.</string>
          </property>
          <property name="placeholderText">
-          <string>Enter file name or browse</string>
+          <string>Enter file name or browse (CSV)</string>
          </property>
         </widget>
        </item>
@@ -47,120 +47,17 @@
       </layout>
      </item>
      <item>
-      <layout class="QGridLayout" name="gridLayout">
-       <item row="2" column="1">
-        <widget class="QCheckBox" name="cbStopOnClose">
-         <property name="text">
-          <string>Stop recording when port closed</string>
-         </property>
-         <property name="checked">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="0">
-        <widget class="QCheckBox" name="cbAutoIncrement">
-         <property name="toolTip">
-          <string>Increments file name automatically everytime a new recording starts</string>
-         </property>
-         <property name="text">
-          <string>Auto increment file name</string>
-         </property>
-         <property name="checked">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="0">
-        <widget class="QCheckBox" name="cbDisableBuffering">
-         <property name="toolTip">
-          <string>Do not buffer when writing to file. Check this if you are using other software to open the file during recording.</string>
-         </property>
-         <property name="text">
-          <string>Disable buffering</string>
-         </property>
-        </widget>
-       </item>
-       <item row="3" column="1">
-        <widget class="QCheckBox" name="cbWindowsLE">
-         <property name="toolTip">
-          <string>Use CR+LF as line endings. Some windows software may not show lines correctly otherwise. Can't be changed during recording.</string>
-         </property>
-         <property name="text">
-          <string>Windows Style Line Endings</string>
-         </property>
-         <property name="checked">
-          <bool>false</bool>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="1">
-        <widget class="QCheckBox" name="cbHeader">
-         <property name="toolTip">
-          <string>Channel names are written to the first line of record file</string>
-         </property>
-         <property name="text">
-          <string>Write header line</string>
-         </property>
-         <property name="checked">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="0">
-        <widget class="QCheckBox" name="cbRecordPaused">
-         <property name="toolTip">
-          <string>Continue recording to file even when plotting is paused</string>
-         </property>
-         <property name="text">
-          <string>Record while paused</string>
-         </property>
-         <property name="checked">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="2">
-        <spacer name="horizontalSpacer_2">
-         <property name="orientation">
-          <enum>Qt::Horizontal</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>1</width>
-           <height>20</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-       <item row="4" column="0">
-        <widget class="QCheckBox" name="cbTimestamp">
-         <property name="toolTip">
-          <string>Insert timestamp (milliseconds from epoch) as first column</string>
-         </property>
-         <property name="text">
-          <string>Insert timestamp</string>
-         </property>
-        </widget>
-       </item>
-       <item row="4" column="1">
-        <layout class="QHBoxLayout" name="horizontalLayout_4">
-         <item>
-          <spacer name="horizontalSpacer_3">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>40</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-        </layout>
-       </item>
-      </layout>
+      <widget class="QCheckBox" name="cbAutoDate">
+       <property name="toolTip">
+        <string>Append the current date and time (to the second) to the file name when recording starts, for example data_2026-10-23_17-23-11.csv</string>
+       </property>
+       <property name="text">
+        <string>Auto increment file date</string>
+       </property>
+       <property name="checked">
+        <bool>true</bool>
+       </property>
+      </widget>
      </item>
      <item>
       <layout class="QHBoxLayout" name="horizontalLayout_3">
@@ -197,22 +94,12 @@
        <item>
         <widget class="QSpinBox" name="spDecimals">
          <property name="toolTip">
-          <string>Number of digits after comma</string>
+          <string>Number of digits after the decimal point</string>
          </property>
          <property name="value">
           <number>6</number>
          </property>
         </widget>
-       </item>
-       <item>
-        <widget class="QLabel" name="label_3">
-         <property name="text">
-          <string>Timestamp In:</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QComboBox" name="cbTimestampFormat"/>
        </item>
        <item>
         <spacer name="horizontalSpacer">

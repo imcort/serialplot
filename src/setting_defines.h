@@ -124,15 +124,10 @@ const char SG_Commands_Type[] = "type";
 const char SG_Commands_Data[] = "data";
 
 // record panel settings keys
-const char SG_Record_AutoIncrement[]    = "autoIncrement";
-const char SG_Record_RecordPaused[]     = "recordPaused";
-const char SG_Record_StopOnClose[]      = "stopOnClose";
-const char SG_Record_Header[]           = "header";
-const char SG_Record_Separator[]        = "separator";
-const char SG_Record_DisableBuffering[] = "disableBuffering";
-const char SG_Record_Timestamp[]        = "timestamp";
-const char SG_Record_TimestampFormat[]  = "timestampFormat";
-const char SG_Record_Decimals[]         = "decimals";
+// the legacy key name keeps existing configurations working
+const char SG_Record_AutoDate[]    = "autoIncrement";
+const char SG_Record_Separator[]   = "separator";
+const char SG_Record_Decimals[]    = "decimals";
 
 // text view settings keys
 const char SG_TextView_NumLines[] = "numLines";

@@ -236,26 +236,7 @@ MainWindow::MainWindow(QWidget *parent) :
                      &stream, &Stream::pause);
 
     QObject::connect(ui->actionPause, &QAction::triggered,
-                     [this](bool enabled)
-                     {
-                         if (enabled && !recordPanel.recordPaused())
-                         {
-                             dataFormatPanel.pause(true);
-                         }
-                         else
-                         {
-                             dataFormatPanel.pause(false);
-                         }
-                     });
-
-    QObject::connect(&recordPanel, &RecordPanel::recordPausedChanged,
-                     [this](bool enabled)
-                     {
-                         if (ui->actionPause->isChecked() && enabled)
-                         {
-                             dataFormatPanel.pause(false);
-                         }
-                     });
+                     &dataFormatPanel, &DataFormatPanel::pause);
 
     connect(portControl.activeDevice(), &QIODevice::aboutToClose,
             &recordPanel, &RecordPanel::onPortClose);

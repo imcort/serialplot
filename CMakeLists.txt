@@ -19,6 +19,17 @@
 
 cmake_minimum_required(VERSION 3.16)
 
+# Target a reasonably old macOS version so that the resulting application can
+# run on more systems. The value can be overridden from the command line:
+#   cmake -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 ...
+# Note that the final binary can never target an older macOS than the Qt
+# libraries it is linked against.
+if (APPLE AND (NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET
+               OR CMAKE_OSX_DEPLOYMENT_TARGET STREQUAL ""))
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING
+      "Minimum macOS version to target" FORCE)
+endif ()
+
 project(serialplot VERSION 0.13.0 LANGUAGES CXX)
 
 set(PROGRAM_NAME ${CMAKE_PROJECT_NAME} CACHE STRING "Output program name")

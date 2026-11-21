@@ -21,7 +21,6 @@
 
 #include <QFileInfo>
 #include <QDir>
-#include <QDateTime>
 #include <QtDebug>
 
 /// Wraps a value in quotes when the CSV would otherwise be ambiguous
@@ -46,9 +45,6 @@ DataRecorder::DataRecorder(QObject *parent) :
     fileStream(&file)
 {
     lastNumChannels = 0;
-    disableBuffering = false;
-    windowsLE = false;
-    timestampOpt = TimestampOption::disabled;
     markerProvider = nullptr;
     markerBase = 0;
     writtenSamples = 0;
@@ -67,11 +63,10 @@ void DataRecorder::setMarkerProvider(const MarkerProvider* provider)
 }
 
 bool DataRecorder::startRecording(QString fileName, QString separator,
-                                  QStringList channelNames, TimestampOption ts)
+                                  QStringList channelNames)
 {
     Q_ASSERT(!file.isOpen());
     _sep =  separator;
-    timestampOpt = ts;
 
     // remember where the sample numbering starts, the marker indexes are
     // absolute so the recording can start at any time
@@ -100,12 +95,8 @@ bool DataRecorder::startRecording(QString fileName, QString separator,
     // write header line
     if (!channelNames.isEmpty())
     {
-        if (timestampOpt != TimestampOption::disabled)
-        {
-            fileStream << tr("timestamp") << _sep;
-        }
         fileStream << channelNames.join(_sep);
-        fileStream << le();
+        fileStream << "\n";
 
         // the two marker columns are not data channels, otherwise every
         // recording with markers would warn about a channel count change
@@ -133,10 +124,6 @@ void DataRecorder::feedIn(const SamplePack& data)
     unsigned numSamples = data.numSamples();
     for (unsigned int i = 0; i < numSamples; i++)
     {
-        if (timestampOpt != TimestampOption::disabled)
-        {
-            fileStream << formatTimestamp() << _sep;
-        }
         for (unsigned ci = 0; ci < numChannels; ci++)
         {
             fileStream << data.data(ci)[i];
@@ -159,10 +146,8 @@ void DataRecorder::feedIn(const SamplePack& data)
         }
         writtenSamples++;
 
-        fileStream << le();
+        fileStream << "\n";
     }
-
-    if (disableBuffering) fileStream.flush();
 }
 
 void DataRecorder::stopRecording()
@@ -171,33 +156,4 @@ void DataRecorder::stopRecording()
 
     file.close();
     lastNumChannels = 0;
-}
-
-QString DataRecorder::formatTimestamp() const
-{
-    Q_ASSERT(timestampOpt != TimestampOption::disabled);
-
-    qint64 ms;
-
-    switch (timestampOpt)
-    {
-        case TimestampOption::seconds:
-            return QString::number(QDateTime::currentSecsSinceEpoch());
-            break;
-        case TimestampOption::seconds_precision:
-            ms = QDateTime::currentMSecsSinceEpoch();
-            return QString("%1.%2").arg(ms / 1000).arg(ms % 1000);
-            break;
-        case TimestampOption::milliseconds:
-            return QString::number(QDateTime::currentMSecsSinceEpoch());
-            break;
-        default:
-            Q_ASSERT(false);
-            return QString();
-    }
-}
-
-const char* DataRecorder::le() const
-{
-    return windowsLE ? "\r\n" : "\n";
 }

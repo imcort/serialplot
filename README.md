@@ -70,6 +70,24 @@ You can use git to download SerialPlot source code.
     cmake ..
     make -j
 
+### macOS compatibility
+
+The macOS build targets macOS 14.0 by default, so it does not require the
+version of macOS that was used to build it. Override the minimum version when
+configuring:
+
+    cmake -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 ..
+
+For a universal binary that also runs on Intel Macs (requires a universal Qt
+installation):
+
+    cmake -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" ..
+
+The effective minimum is also limited by the Qt libraries. Use a Qt build whose
+deployment target is at least as old as the desired macOS version (for example
+the official Qt 6.8 builds support macOS 12 and newer). Homebrew add-on modules
+may be built for the host version only; you can check with `otool -l <framework>`.
+
 ## License
 
 This software is licensed under GPLv3 excluding some third party
