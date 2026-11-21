@@ -150,6 +150,22 @@
       </widget>
      </item>
      <item>
+      <widget class="QPushButton" name="pbSaveBuffer">
+       <property name="minimumSize">
+        <size>
+         <width>85</width>
+         <height>32</height>
+        </size>
+       </property>
+       <property name="toolTip">
+        <string>Save the complete current buffer of all channels to a CSV file</string>
+       </property>
+       <property name="text">
+        <string>Save Buffer</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <spacer name="verticalSpacer_2">
        <property name="orientation">
         <enum>Qt::Vertical</enum>

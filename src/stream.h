@@ -62,6 +62,8 @@ public:
     unsigned numChannels() const;
 
     unsigned numSamples() const;
+    /// Number of valid (received) samples currently in the buffers
+    unsigned usedSamples() const;
     const StreamChannel* channel(unsigned index) const;
     StreamChannel* channel(unsigned index);
     QVector<const StreamChannel*> allChannels() const;

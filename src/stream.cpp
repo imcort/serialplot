@@ -81,6 +81,12 @@ unsigned Stream::numSamples() const
     return _numSamples;
 }
 
+unsigned Stream::usedSamples() const
+{
+    if (channels.isEmpty()) return 0;
+    return static_cast<const RingBuffer*>(channels[0]->yData())->validSamples();
+}
+
 const StreamChannel* Stream::channel(unsigned index) const
 {
     Q_ASSERT(index < numChannels());

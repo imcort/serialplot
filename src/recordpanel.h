@@ -42,6 +42,10 @@ public:
 
     QToolBar* toolbar();
 
+    /// Saves the current (complete) stream buffer to a CSV file.
+    /// @return true on success
+    bool saveBufferToFile(const QString& fileName);
+
     /// Stores settings into a `QSettings`
     void saveSettings(QSettings* settings);
     /// Loads settings from a `QSettings`.
@@ -54,6 +58,9 @@ signals:
 public slots:
     /// Must be called when port is closed
     void onPortClose();
+
+    /// Asks for a file name and saves the current stream buffer
+    void saveBuffer();
 
 private:
     Ui::RecordPanel *ui;

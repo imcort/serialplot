@@ -144,6 +144,7 @@ HEADERS += \
     src/barplot.h \
     src/barscaledraw.h \
     src/channelinfomodel.h \
+    src/csvutils.h \
     src/datarecorder.h \
     src/defines.h \
     src/indexbuffer.h \

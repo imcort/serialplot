@@ -26,7 +26,7 @@ RingBuffer::RingBuffer(unsigned n)
     _size = n;
     data = new double[_size]();
     headIndex = 0;
-    hasData = false;
+    _validSamples = 0;
 
     limInvalid = false;
     limCache = {0, 0};
@@ -40,6 +40,11 @@ RingBuffer::~RingBuffer()
 unsigned RingBuffer::size() const
 {
     return _size;
+}
+
+unsigned RingBuffer::validSamples() const
+{
+    return _validSamples;
 }
 
 double RingBuffer::sample(unsigned i) const
@@ -89,6 +94,7 @@ void RingBuffer::resize(unsigned n)
     data = newData;
     headIndex = 0;
     _size = n;
+    if (_validSamples > _size) _validSamples = _size;
 
     // invalidate bounding rectangle
     limInvalid = true;
@@ -101,14 +107,13 @@ void RingBuffer::addSamples(double* samples, unsigned n)
     // Before the first samples arrive the whole buffer is zero. Fill it with
     // the first sample value so that auto scaling isn't stretched down to
     // zero and the plot starts from a flat line at the first real value.
-    if (!hasData)
+    if (_validSamples == 0)
     {
         for (unsigned i = 0; i < _size; i++)
         {
             data[i] = samples[0];
         }
         headIndex = 0;
-        hasData = true;
     }
 
     unsigned shift = n;
@@ -155,6 +160,9 @@ void RingBuffer::addSamples(double* samples, unsigned n)
         headIndex = 0;
     }
 
+    _validSamples += n;
+    if (_validSamples > _size) _validSamples = _size;
+
     // invalidate cache
     limInvalid = true;
 }
@@ -167,7 +175,7 @@ void RingBuffer::clear()
     }
 
     headIndex = 0;
-    hasData = false;
+    _validSamples = 0;
     limCache = {0, 0};
     limInvalid = false;
 }

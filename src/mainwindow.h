@@ -109,6 +109,7 @@ private:
     SnapshotManager snapshotMan;
     SampleCounter sampleCounter;
 
+    QLabel* bufferUsageLabel;
     QLabel spsLabel;
     CommandPanel commandPanel;
     DataFormatPanel dataFormatPanel;
@@ -158,6 +159,7 @@ private slots:
     void onPortToggled(bool open);
     void onSourceChanged(Source* source);
     void onNumOfSamplesChanged(int value);
+    void updateBufferUsage();
 
     void clearPlot();
     void onSpsChanged(float sps);

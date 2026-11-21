@@ -24,6 +24,8 @@
 #include <QDateTime>
 #include <QMessageBox>
 #include <QFileDialog>
+#include <QSaveFile>
+#include <QTextStream>
 #include <QRegularExpression>
 #include <QCompleter>
 #include <QFileSystemModel>
@@ -32,6 +34,7 @@
 #include "recordpanel.h"
 #include "ui_recordpanel.h"
 #include "setting_defines.h"
+#include "csvutils.h"
 
 RecordPanel::RecordPanel(Stream* stream, QWidget *parent) :
     QWidget(parent),
@@ -53,6 +56,8 @@ RecordPanel::RecordPanel(Stream* stream, QWidget *parent) :
 
     connect(ui->pbBrowse, &QPushButton::clicked,
             this, &RecordPanel::selectFile);
+    connect(ui->pbSaveBuffer, &QPushButton::clicked,
+            this, &RecordPanel::saveBuffer);
     connect(&recordAction, &QAction::triggered,
             this, &RecordPanel::onRecord);
 
@@ -327,6 +332,108 @@ void RecordPanel::onPortClose()
         stopRecording();
         recordAction.setChecked(false);
     }
+}
+
+void RecordPanel::saveBuffer()
+{
+    // The RecordPanel can be hidden when the toolbar button is used, so use
+    // the top-level window as the dialog parent.
+    QWidget* dialogParent = window();
+
+    if (_stream->numChannels() == 0 || _stream->usedSamples() == 0)
+    {
+        QMessageBox::warning(dialogParent, tr("Save Current Buffer"),
+                             tr("There is no buffer data to save."));
+        return;
+    }
+
+    const QString defaultName = QString("buffer_%1.csv").arg(
+        QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss"));
+
+    QString fileName = QFileDialog::getSaveFileName(
+        dialogParent, tr("Save Current Buffer"), defaultName,
+        tr("CSV files (*.csv);;All files (*)"));
+
+    if (fileName.isEmpty()) return;
+
+    fileName = ensureCsvSuffix(fileName);
+    if (!saveBufferToFile(fileName))
+    {
+        QMessageBox::critical(dialogParent, tr("Save Current Buffer"),
+                              tr("Could not save the buffer to:\n%1").arg(fileName));
+    }
+    else
+    {
+        qInfo() << "Current buffer saved to:" << fileName;
+    }
+}
+
+bool RecordPanel::saveBufferToFile(const QString& fileName)
+{
+    const unsigned numChannels = _stream->numChannels();
+    const unsigned capacity = _stream->numSamples();
+    const unsigned used = _stream->usedSamples();
+    if (numChannels == 0 || used == 0) return false;
+
+    QSaveFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+    {
+        qCritical() << "Couldn't open buffer file for writing:" << file.errorString();
+        return false;
+    }
+
+    QTextStream stream(&file);
+    stream.setRealNumberNotation(QTextStream::FixedNotation);
+    stream.setRealNumberPrecision(ui->spDecimals->value());
+
+    const QString sep = getSeparator();
+    const bool withMarkers = _stream->markersEnabled();
+
+    // header
+    for (unsigned ci = 0; ci < numChannels; ci++)
+    {
+        if (ci != 0) stream << sep;
+        stream << _stream->infoModel()->name(ci);
+    }
+    if (withMarkers)
+    {
+        if (numChannels != 0) stream << sep;
+        stream << tr("Marker") << sep << tr("Marker Value");
+    }
+    stream << '\n';
+
+    // Rows, oldest valid sample first. When the buffer isn't full the valid
+    // samples are at the end of the ring buffer, the leading part still holds
+    // the initial fill value.
+    const unsigned startIndex = capacity - used;
+    const quint64 firstAbsoluteIndex = _stream->totalSamples() - used;
+    for (unsigned i = startIndex; i < capacity; i++)
+    {
+        for (unsigned ci = 0; ci < numChannels; ci++)
+        {
+            if (ci != 0) stream << sep;
+            stream << _stream->channel(ci)->yData()->sample(i);
+        }
+
+        if (withMarkers)
+        {
+            const QString value = _stream->markerValue(
+                firstAbsoluteIndex + (i - startIndex));
+            if (numChannels != 0) stream << sep;
+            stream << (value.isEmpty() ? QLatin1Char('0') : QLatin1Char('1')) << sep;
+            if (!value.isEmpty()) stream << csvField(value, sep);
+        }
+        stream << '\n';
+    }
+
+    stream.flush();
+    if (!file.commit())
+    {
+        qCritical() << "File save error during buffer save:" << file.error();
+        return false;
+    }
+
+    return true;
 }
 
 QString RecordPanel::getSeparator() const

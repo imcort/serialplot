@@ -30,6 +30,8 @@ public:
     ~RingBuffer();
 
     virtual unsigned size() const;
+    /// Number of samples that have actually been received (capped by size)
+    unsigned validSamples() const;
     virtual double sample(unsigned i) const;
     virtual Range limits() const;
     virtual void resize(unsigned n);
@@ -40,7 +42,7 @@ private:
     unsigned _size;            ///< size of `data`
     double* data;              ///< storage
     unsigned headIndex;        ///< indicates the actual `0` index of the ring buffer
-    bool hasData;              ///< false until the first samples are written
+    unsigned _validSamples;    ///< number of samples received since the last clear
 
     mutable bool limInvalid;   ///< Indicates that limits needs to be re-calculated
     mutable Range limCache;    ///< Cache for limits()

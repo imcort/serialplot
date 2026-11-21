@@ -31,6 +31,7 @@
 #include <QFile>
 #include <QTextStream>
 #include <QMenu>
+#include <QPushButton>
 #include <QDesktopServices>
 #include <QMap>
 #include <QtDebug>
@@ -75,6 +76,7 @@ MainWindow::MainWindow(QWidget *parent) :
     portControl(&serialPort, &bleDevice, &markerSerialPort),
     secondaryPlot(NULL),
     snapshotMan(this, &stream),
+    bufferUsageLabel(nullptr),
     commandPanel(&serialPort),
     dataFormatPanel(&serialPort),
     recordPanel(&stream),
@@ -101,6 +103,23 @@ MainWindow::MainWindow(QWidget *parent) :
     addToolBar(recordPanel.toolbar());
 
     ui->plotToolBar->addAction(snapshotMan.takeSnapshotAction());
+
+    ui->plotToolBar->addSeparator();
+    bufferUsageLabel = new QLabel(this);
+    bufferUsageLabel->setObjectName("bufferUsageLabel");
+    bufferUsageLabel->setToolTip(tr("Valid samples currently stored in the buffer"));
+    bufferUsageLabel->setMinimumWidth(200);
+    bufferUsageLabel->setAlignment(Qt::AlignCenter);
+    ui->plotToolBar->addWidget(bufferUsageLabel);
+
+    auto saveBufferButton = new QPushButton(tr("Save Buffer"), this);
+    saveBufferButton->setObjectName("tbSaveBuffer");
+    saveBufferButton->setToolTip(
+        tr("Save the valid contents of the current buffer to a CSV file"));
+    connect(saveBufferButton, &QPushButton::clicked,
+            &recordPanel, &RecordPanel::saveBuffer);
+    ui->plotToolBar->addWidget(saveBufferButton);
+
     menuBar()->insertMenu(ui->menuHelp->menuAction(), snapshotMan.menu());
     menuBar()->insertMenu(ui->menuHelp->menuAction(), commandPanel.menu());
 
@@ -207,6 +226,9 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(&plotControlPanel, &PlotControlPanel::numOfSamplesChanged,
             plotMan, &PlotManager::setNumOfSamples);
 
+    connect(&stream, &Stream::dataAdded,
+            this, &MainWindow::updateBufferUsage);
+
     connect(&plotControlPanel, &PlotControlPanel::yScaleChanged,
             plotMan, &PlotManager::setYAxis);
 
@@ -304,6 +326,8 @@ MainWindow::MainWindow(QWidget *parent) :
                 this->ui->tabWidget->setCurrentWidget(&commandPanel);
                 this->ui->tabWidget->showTabs();
             });
+
+    updateBufferUsage();
 }
 
 MainWindow::~MainWindow()
@@ -417,6 +441,7 @@ void MainWindow::clearPlot()
 {
     stream.clear();
     plotMan->replot();
+    updateBufferUsage();
 }
 
 void MainWindow::onNumOfSamplesChanged(int value)
@@ -424,6 +449,28 @@ void MainWindow::onNumOfSamplesChanged(int value)
     numOfSamples = value;
     stream.setNumSamples(value);
     plotMan->replot();
+    updateBufferUsage();
+}
+
+void MainWindow::updateBufferUsage()
+{
+    if (bufferUsageLabel == nullptr) return;
+
+    const unsigned used = stream.usedSamples();
+    const unsigned capacity = stream.numSamples();
+    const double percent = capacity ? (100.0 * used / capacity) : 0.0;
+
+    bufferUsageLabel->setText(
+        tr("Buffer: %1 / %2 (%3%)")
+        .arg(QLocale().toString(static_cast<qulonglong>(used)))
+        .arg(QLocale().toString(static_cast<qulonglong>(capacity)))
+        .arg(percent, 0, 'f', 0));
+
+    bufferUsageLabel->setToolTip(
+        tr("Valid samples in the buffer: %1 of %2 (%3%)")
+        .arg(QLocale().toString(static_cast<qulonglong>(used)))
+        .arg(QLocale().toString(static_cast<qulonglong>(capacity)))
+        .arg(percent, 0, 'f', 1));
 }
 
 void MainWindow::onSpsChanged(float sps)

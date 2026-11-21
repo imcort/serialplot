@@ -23,22 +23,7 @@
 #include <QDir>
 #include <QtDebug>
 
-/// Wraps a value in quotes when the CSV would otherwise be ambiguous
-static QString csvField(const QString& value, const QString& separator)
-{
-    const bool needsQuotes =
-        value.contains(separator) ||
-        value.contains('"') ||
-        value.contains('\n') ||
-        value.contains('\r') ||
-        (!value.isEmpty() && (value.front().isSpace() || value.back().isSpace()));
-
-    if (!needsQuotes) return value;
-
-    QString escaped = value;
-    escaped.replace('"', "\"\"");
-    return QString('"') + escaped + QString('"');
-}
+#include "csvutils.h"
 
 DataRecorder::DataRecorder(QObject *parent) :
     QObject(parent),
